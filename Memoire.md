@@ -541,9 +541,64 @@ docker compose stop db
 - Le test d'identification honnête (`User-Agent` fixe, jamais de rotation) est maintenant automatisé
   et fera partie de la suite à chaque exécution future.
 
-**Prochaine étape : 5, normalisation et stockage complets** (dictionnaire des libellés, résultats
-officiels, rattrapage de l'historique).
+### Étape 5 : dictionnaire, résultats et rattrapage (2026-09-21) : terminée
+
+**Fichiers créés** :
+
+| Fichier | Rôle |
+|---|---|
+| `src/collector/dictionary.py` | `MarketDictionary` : chargement paresseux et mis en cache des chunks du CDN, résolution des libellés, mise à jour de `markets_dict` pour les marchés jamais vus |
+| `src/collector/results.py` | Modèles des résultats, analyse du score (`parse_score`), découpage en fenêtres alignées (`iter_windows`), `backfill_results` (rattrapage ancré une fois pour toutes) et `reconcile_recent` (réconciliation périodique, idempotente) |
+| `tests/fixtures/dictionary/`, `tests/fixtures/results_*.json` | Table des chunks et neuf chunks réellement téléchargés lors de la reconnaissance ; échantillons de résultats des deux ligues |
+| `tests/unit/test_dictionary.py`, `tests/unit/test_results.py`, `tests/integration/test_results.py` | 45 tests supplémentaires (109 au total) |
+
+**Deux bugs trouvés et corrigés avant la fin de l'étape**, tous deux avant d'avoir touché au réseau réel (détectés par les tests, sur les fixtures) :
+
+1. **Dérive de la grille de rattrapage.** Ma première version recalculait la borne « maintenant » à
+   chaque appel de `backfill_results`. Après une reprise, la grille de fenêtres se serait décalée
+   par rapport au premier passage, et l'intervalle entre l'ancien et le nouveau « maintenant »
+   n'aurait jamais été couvert. Corrigé : l'« ancre » (borne haute du rattrapage) est fixée une
+   seule fois, à la toute première exécution, et conservée dans le point de contrôle ; les reprises
+   la réutilisent sans jamais la recalculer. La couverture des résultats les plus récents est
+   assurée séparément par `reconcile_recent`, rejouée sans risque toutes les 5 min (idempotente,
+   sans point de contrôle).
+2. **Incohérence réelle du site, déjà repérée en reconnaissance mais pas reportée dans le code.**
+   Les groupes Total, Total 1 et Total 2 (17, 15, 62) vivent en réalité dans le chunk 0 du
+   dictionnaire, alors que la table des intervalles désigne un autre chunk pour ces identifiants.
+   `MarketDictionary.label_for` essaie maintenant le chunk indiqué par la table, puis le chunk 0 en
+   repli, avant de conclure qu'un marché est inconnu. Une seconde incohérence, mineure, a aussi été
+   confirmée par les tests : le libellé du groupe « Total d'Animality » porte une apostrophe, celui
+   de ses sélections non (« Total Animality Plus de () ») — stocké tel quel, sans correction.
+
+**Ce que les tests prouvent** : les libellés officiels de 15 marchés (couvrant les deux ligues) sont
+résolus correctement à partir des fichiers réellement téléchargés du CDN ; un chunk n'est récupéré
+qu'une seule fois même s'il sert plusieurs résolutions ; un groupe ou un type inconnu renvoie une
+absence de résultat sans lever d'erreur ; l'analyse du score gère les codes de finish à une ou deux
+lettres (R, F, B, Ba, Fr, An, Hk), le suffixe Mercy de Mortal Kombat 3, un round illisible isolé
+(ignoré sans faire échouer tout le résultat), et rejette un score totalement méconnaissable ou à
+égalité ; le découpage en fenêtres respecte l'alignement sur 300 s et la limite de 2 jours, sans trou
+ni recouvrement ; le rattrapage reprend exactement où il s'est arrêté après une interruption
+simulée en plein milieu (panne réseau), sans jamais perdre de fenêtre ni redemander ce qui a déjà
+réussi ; le stockage des résultats est idempotent et complète le tableau des rounds déjà connu sans
+l'écraser, y compris quand un résultat est ignoré (score illisible) sans faire échouer le lot.
+
+**Résultat** : 109 tests passés, confirmés sur deux exécutions complètes indépendantes.
+
+**Commandes** : inchangées depuis l'étape 4 (voir plus haut).
+
+**Points d'attention pour la suite** :
+- Ni le dictionnaire ni le rattrapage ne sont encore appelés automatiquement : ce sont des briques
+  prêtes à l'emploi, à brancher sur l'ordonnanceur permanent (étape 6), avec les intervalles déjà
+  configurés dans `config/settings.yaml` (rafraîchissement du dictionnaire toutes les 6 h,
+  réconciliation des résultats toutes les 5 min, rattrapage de 90 jours au premier lancement).
+- `days_back` doit rester constant d'un appel à l'autre pour une même ligue (documenté dans le code) :
+  le changer nécessite d'effacer le point de contrôle de cette ligue.
+- Le champ `WT` et le sens exact du drapeau `CE`/`isCenter` restent non interprétés, stockés bruts.
+
+**Prochaine étape : 6, concurrence et reprise complète** (ordonnanceur permanent, deux ligues en
+parallèle, relecture complète de l'état au démarrage, intégration du dictionnaire et des résultats
+dans la boucle de collecte).
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 (schéma) et 4 (prototype du collecteur) terminées et testées (62 tests)**. Le collecteur s'identifie honnêtement et ne contourne jamais un blocage (section 20). Prochaine étape : 5 (dictionnaire, résultats, rattrapage). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3, 4 et 5 terminées et testées (109 tests)**. Le collecteur s'identifie honnêtement et ne contourne jamais un blocage (section 20). Prochaine étape : 6 (ordonnanceur permanent, concurrence, reprise complète). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).

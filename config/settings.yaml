@@ -24,3 +24,15 @@ site_params:
 
 scheduler:
   poll_interval_seconds: 5
+
+dictionary:
+  base_url: https://v3.cdnafric.com
+  refresh_interval_hours: 6
+
+results:
+  # Rattrapage de l'historique au premier lancement (voir Memoire.md section 2.2 : au moins
+  # 90 jours disponibles côté site). L'ancre de ce rattrapage est fixée une seule fois (results.py).
+  backfill_days: 90
+  # Réconciliation périodique des matchs récemment terminés (idempotente, sans point de contrôle).
+  reconcile_lookback_hours: 2
+  reconcile_interval_minutes: 5

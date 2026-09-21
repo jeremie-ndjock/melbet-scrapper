@@ -67,3 +67,29 @@ SELECT game_id, g, t, param, odds, blocked, is_center, ts_server
 FROM odds_latest
 WHERE game_id = ANY($1::bigint[])
 """
+
+# Dictionnaire des marchés : table de référence, mise à jour (pas d'historique, contrairement aux cotes).
+UPSERT_MARKET_LABEL = """
+INSERT INTO markets_dict (group_id, type_id, group_label, type_label, updated_at)
+VALUES ($1, $2, $3, $4, now())
+ON CONFLICT (group_id, type_id) DO UPDATE SET
+    group_label = EXCLUDED.group_label,
+    type_label  = EXCLUDED.type_label,
+    updated_at  = now()
+"""
+
+# Marchés vus dans les cotes mais jamais résolus dans le dictionnaire (voir dictionary.py).
+SELECT_UNLABELED_MARKETS = """
+SELECT DISTINCT o.g, o.t
+FROM odds_snapshots o
+LEFT JOIN markets_dict d ON d.group_id = o.g AND d.type_id = o.t
+WHERE d.group_id IS NULL
+"""
+
+# Point de reprise du rattrapage des résultats (une clé par ligue, voir results.py).
+UPSERT_CHECKPOINT = """
+INSERT INTO checkpoints (worker, key, value)
+VALUES ($1, $2, $3::jsonb)
+ON CONFLICT (worker, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+"""
+SELECT_CHECKPOINT = "SELECT value FROM checkpoints WHERE worker = $1 AND key = $2"

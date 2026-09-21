@@ -37,9 +37,24 @@ class TransportConfig:
 
 
 @dataclass(frozen=True)
+class DictionaryConfig:
+    base_url: str
+    refresh_interval_hours: float = 6.0
+
+
+@dataclass(frozen=True)
+class ResultsConfig:
+    backfill_days: int = 90
+    reconcile_lookback_hours: float = 2.0
+    reconcile_interval_minutes: float = 5.0
+
+
+@dataclass(frozen=True)
 class Settings:
     transport: TransportConfig
     site_params: dict[str, str]
+    dictionary: DictionaryConfig
+    results: ResultsConfig
     poll_interval_seconds: float = 5.0
 
 
@@ -73,5 +88,7 @@ def load_settings(path: Path | None = None) -> Settings:
     return Settings(
         transport=transport,
         site_params={str(k): str(v) for k, v in data["site_params"].items()},
+        dictionary=DictionaryConfig(**data["dictionary"]),
+        results=ResultsConfig(**data.get("results", {})),
         poll_interval_seconds=float(data.get("scheduler", {}).get("poll_interval_seconds", 5)),
     )

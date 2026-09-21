@@ -78,10 +78,10 @@ class HttpClient:
         """Sérialise les paramètres triés par ordre alphabétique du nom (exigence du site)."""
         return "&".join(f"{k}={params[k]}" for k in sorted(params))
 
-    async def get(self, path: str, params: dict[str, object]) -> FetchResult:
+    async def get(self, path: str, params: dict[str, object] | None = None) -> FetchResult:
         """GET avec reprise bornée sur erreur transitoire. Lève ``BlockedError`` sans réessayer
         sur 403/429 ; lève ``ServerError`` si toutes les tentatives transitoires ont échoué."""
-        query = self._sorted_query(params)
+        url = f"{path}?{self._sorted_query(params)}" if params else path
         last_error: Exception | None = None
 
         for attempt in range(1, self._retry.max_attempts + 1):
@@ -89,7 +89,7 @@ class HttpClient:
             await self._rate_limiter.wait()
             t0 = time.perf_counter()
             try:
-                response = await self._client.get(f"{path}?{query}")
+                response = await self._client.get(url)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 self._circuit.on_failure()
                 last_error = exc
