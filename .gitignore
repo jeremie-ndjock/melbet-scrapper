@@ -1,0 +1,10 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Outils locaux
+.playwright-mcp/
+__pycache__/
+*.pyc
+*.bak

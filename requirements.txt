@@ -1,0 +1,7 @@
+# Dépendances d'exécution (versions épinglées).
+# httpx : client HTTP asynchrone (HTTP/1.1, connexions persistantes) ; pydantic : validation des réponses ;
+# asyncpg : PostgreSQL ; PyYAML : configuration. prometheus-client sera ajouté à l'étape 8.
+asyncpg==0.31.0
+httpx==0.28.1
+pydantic==2.13.5
+PyYAML==6.0.3

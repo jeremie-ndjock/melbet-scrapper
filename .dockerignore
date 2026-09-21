@@ -1,0 +1,11 @@
+# Ne jamais envoyer de secrets ni de fichiers inutiles dans le contexte de build.
+.env
+.env.*
+!.env.example
+.git
+.playwright-mcp
+__pycache__
+*.pyc
+*.bak
+docs
+Memoire.md

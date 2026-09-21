@@ -1,0 +1,8 @@
+# Ligues collectées. Ajouter une ligue = ajouter une entrée ici (aucun changement de code).
+leagues:
+  - id: 1252965
+    name: Mortal Kombat X
+    sport_id: 103
+  - id: 2282406
+    name: Mortal Kombat 3
+    sport_id: 103

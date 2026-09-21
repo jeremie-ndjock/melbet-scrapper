@@ -1,0 +1,26 @@
+# Réglages du collecteur. Aucun secret ici (les secrets sont dans .env).
+transport:
+  base_url: https://melbet-cm.com
+  # Identification honnête et fixe : pas de rotation, pas d'imitation de navigateur.
+  user_agent: OddsCollector/1.0
+  timeout_seconds: 10
+  # Débit maximal vers le site (requêtes par seconde), tous appels confondus.
+  max_requests_per_second: 1.0
+  # Reprises : uniquement pour les erreurs transitoires (timeout, coupure réseau, 5xx).
+  retry:
+    max_attempts: 3
+    base_delay_seconds: 0.5
+    max_delay_seconds: 4.0
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_seconds: 30
+
+# Paramètres de requête imposés par le site (relevés dans le navigateur, section 2 de Memoire.md).
+site_params:
+  fcountry: 84
+  gr: 2147
+  lng: fr
+  ref: 8
+
+scheduler:
+  poll_interval_seconds: 5
