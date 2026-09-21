@@ -56,9 +56,12 @@ def test_totally_malformed_score_raises():
         parse_score("pas un score du tout")
 
 
-def test_tied_final_score_raises():
-    with pytest.raises(ResultParseError, match="égalité"):
-        parse_score("3:3(1:0 R;0:1 R;1:0 R;0:1 R;1:0 R;0:1 R)")
+def test_tied_final_score_is_accepted_with_no_winner():
+    """Observé en réel le 2026-09-21 (étape 6) : un match Mortal Kombat 3 terminé 2:2. Perdre ce
+    résultat serait pire que d'accepter une égalité inhabituelle pour ce sport."""
+    parsed = parse_score("2:2(0:1 R ,M- / M+; 0:1 F ,M- / M-; 1:0 R ,M- / M-; 1:0 R ,M- / M-)")
+    assert (parsed.final1, parsed.final2, parsed.winner) == (2, 2, None)
+    assert len(parsed.rounds) == 4
 
 
 def test_align_down_rounds_to_previous_5_minutes():

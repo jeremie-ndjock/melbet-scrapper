@@ -101,3 +101,17 @@ async def db(template_db):
     finally:
         await conn.close()
         await _admin_execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+@pytest.fixture
+async def db_pool(template_db):
+    """Petit pool de connexions vers une copie neuve de la base modèle migrée (pour le
+    Scheduler, qui utilise `pool.acquire()` plutôt qu'une connexion unique)."""
+    name = f"test_{uuid.uuid4().hex[:12]}"
+    await _create_from_template(name, template_db)
+    pool = await asyncpg.create_pool(_dsn_for(name), min_size=1, max_size=4)
+    try:
+        yield pool
+    finally:
+        await pool.close()
+        await _admin_execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')

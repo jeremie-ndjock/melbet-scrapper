@@ -17,3 +17,12 @@ RUN pip install -r requirements-dev.txt
 ENV PYTHONPATH=/app/src
 USER app
 CMD ["pytest"]
+
+# Étape 6 : image minimale d'exécution du collecteur. Durcissement complet (utilisateur non root
+# déjà en place ; journaux, healthcheck, image plus petite) prévu à l'étape 10.
+FROM base AS runtime
+COPY src ./src
+COPY config ./config
+ENV PYTHONPATH=/app/src
+USER app
+CMD ["python", "-m", "collector.main"]

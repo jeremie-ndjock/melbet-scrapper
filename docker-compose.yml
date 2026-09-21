@@ -1,6 +1,6 @@
-# Étape 3 : base de données et exécution des tests. Les services scraper, prometheus et grafana
-# seront ajoutés aux étapes suivantes. Aucun port n'est publié : la base n'est joignable que depuis
-# le réseau Docker (accès manuel : `docker compose exec db psql -U $POSTGRES_USER $POSTGRES_DB`).
+# Étapes 3 et 6 : base de données et collecteur. Prometheus et Grafana viendront à l'étape 8.
+# Aucun port n'est publié : la base n'est joignable que depuis le réseau Docker (accès manuel :
+# `docker compose exec db psql -U $POSTGRES_USER $POSTGRES_DB`).
 name: oddscollector
 
 services:
@@ -21,6 +21,24 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+
+  # Collecteur (étape 6). Image minimale pour l'instant : voir Dockerfile, cible `runtime`.
+  # Lancement manuel : `docker compose up scraper`. Le durcissement (secrets d'alerting,
+  # utilisateur applicatif dédié en base, etc.) est prévu aux étapes 8 et 10.
+  scraper:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    # Un rattrapage de résultats en cours peut prendre jusqu'à environ une minute par ligue à
+    # s'interrompre proprement (une requête réseau à la fois, jamais annulée en plein vol) :
+    # laisser à `docker stop` le temps de le faire avant d'envoyer SIGKILL.
+    stop_grace_period: 90s
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
 
   # Tests d'intégration : `docker compose --profile test run --rm tests`
   tests:

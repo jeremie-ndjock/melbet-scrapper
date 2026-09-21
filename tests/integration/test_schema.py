@@ -158,8 +158,20 @@ async def test_result_insert_is_idempotent_and_constrained(db):
     await db.execute(queries.INSERT_RESULT, *args)
     await db.execute(queries.INSERT_RESULT, *args)
     assert await db.fetchval("SELECT count(*) FROM results") == 1
-    with pytest.raises(asyncpg.CheckViolationError):          # un match ne finit pas à égalité
-        await db.execute(queries.INSERT_RESULT, 78, MK_3, 1, 2, "A", "B", 5, 5, 1, "x", T0, 3)
+    with pytest.raises(asyncpg.CheckViolationError):          # gagnant incohérent avec un score non nul
+        await db.execute(queries.INSERT_RESULT, 78, MK_3, 1, 2, "A", "B", 5, 3, None, "x", T0, 3)
+    with pytest.raises(asyncpg.CheckViolationError):          # score négatif
+        await db.execute(queries.INSERT_RESULT, 79, MK_3, 1, 2, "A", "B", -1, 3, 2, "x", T0, 3)
+
+
+async def test_result_insert_allows_a_tied_final_score(db):
+    """Observé en réel le 2026-09-21 (étape 6) : un match Mortal Kombat 3 terminé 2:2. La
+    migration 005 corrige l'hypothèse initiale (aucune égalité possible), fausse en pratique."""
+    await db.execute(queries.INSERT_RESULT, 80, MK_3, 1, 2, "A", "B", 2, 2, None, "2:2(...)", T0, 3)
+    row = await db.fetchrow("SELECT final_score1, final_score2, winner FROM results WHERE game_id = 80")
+    assert (row["final_score1"], row["final_score2"], row["winner"]) == (2, 2, None)
+    with pytest.raises(asyncpg.CheckViolationError):  # un score à égalité ne peut pas avoir de gagnant
+        await db.execute(queries.INSERT_RESULT, 81, MK_3, 1, 2, "A", "B", 2, 2, 1, "2:2(...)", T0, 3)
 
 
 # --------------------------------------------------------------------------- exploitation

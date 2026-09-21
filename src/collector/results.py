@@ -67,19 +67,23 @@ class ParsedRound:
 class ParsedScore:
     final1: int
     final2: int
-    winner: int
+    winner: int | None  # None : match terminé à égalité (observé en réel, voir migrations/005)
     rounds: list[ParsedRound]
 
 
 def parse_score(raw: str) -> ParsedScore:
     """Analyse la chaîne de score. Un round au format inattendu est ignoré (avec un avertissement),
-    pas fatal ; seule une chaîne globalement méconnaissable lève ``ResultParseError``."""
+    pas fatal ; seule une chaîne globalement méconnaissable lève ``ResultParseError``.
+
+    Un score final à égalité est accepté (``winner=None``) : observé en réel le 2026-09-21 (un
+    match Mortal Kombat 3 terminé 2:2), vraisemblablement une interruption ou un incident
+    technique côté site plutôt qu'une règle du jeu, mais bien réel — l'ignorer perdrait ce résultat.
+    """
     m = _SCORE_RE.match(raw.strip())
     if not m:
         raise ResultParseError(f"format de score méconnaissable : {raw!r}")
     final1, final2 = int(m.group(1)), int(m.group(2))
-    if final1 == final2:
-        raise ResultParseError(f"score final à égalité, impossible pour ce sport : {raw!r}")
+    winner = 1 if final1 > final2 else (2 if final2 > final1 else None)
 
     rounds: list[ParsedRound] = []
     for i, fragment in enumerate(m.group(3).split(";"), start=1):
@@ -95,7 +99,7 @@ def parse_score(raw: str) -> ParsedScore:
             mercy_p1=None if mercy1 is None else mercy1 == "M+",
             mercy_p2=None if mercy2 is None else mercy2 == "M+",
         ))
-    return ParsedScore(final1, final2, winner=1 if final1 > final2 else 2, rounds=rounds)
+    return ParsedScore(final1, final2, winner=winner, rounds=rounds)
 
 
 def align_down(ts: datetime) -> datetime:
@@ -132,28 +136,36 @@ async def fetch_results(client: HttpClient, champ_id: int, date_from: datetime, 
 async def store_results(conn, league_id: int, games: list[RawResultGame]) -> int:
     """Enregistre les résultats et le détail des rounds. Idempotent : un résultat déjà connu n'est
     pas remplacé ; un round déjà décrit par le tableau des rounds en direct n'est que complété
-    (code de finish, Mercy), jamais écrasé (voir migrations/002 et storage/queries.py)."""
-    n_stored = 0
+    (code de finish, Mercy), jamais écrasé (voir migrations/002 et storage/queries.py).
+
+    Écritures groupées (``executemany``) : une fenêtre de 2 jours peut contenir plusieurs centaines
+    de matchs (mesuré : jusqu'à environ 289 par jour et par ligue, Memoire.md section 2.2). Écrire
+    chaque résultat et chaque round un par un multiplierait les allers-retours vers la base par
+    plusieurs centaines pour une seule fenêtre de rattrapage.
+    """
+    result_rows = []
+    round_rows = []
     for game in games:
         try:
             parsed = parse_score(game.score)
         except ResultParseError as exc:
             log.error("résultat %s ignoré : %s", game.id, exc)
             continue
-
-        await conn.execute(
-            queries.INSERT_RESULT, game.id, league_id,
-            game.opp1Ids[0] if game.opp1Ids else None, game.opp2Ids[0] if game.opp2Ids else None,
-            game.opp1, game.opp2, parsed.final1, parsed.final2, parsed.winner, game.score,
+        result_rows.append((
+            game.id, league_id, game.opp1Ids[0] if game.opp1Ids else None,
+            game.opp2Ids[0] if game.opp2Ids else None, game.opp1, game.opp2,
+            parsed.final1, parsed.final2, parsed.winner, game.score,
             datetime.fromtimestamp(game.dateStart, tz=timezone.utc), 3,
+        ))
+        round_rows.extend(
+            (game.id, r.round_no, r.winner, None, None, r.finish_code, None, None, r.mercy_p1, r.mercy_p2)
+            for r in parsed.rounds
         )
-        for r in parsed.rounds:
-            await conn.execute(
-                queries.UPSERT_ROUND_RESULT, game.id, r.round_no, r.winner, None, None,
-                r.finish_code, None, None, r.mercy_p1, r.mercy_p2,
-            )
-        n_stored += 1
-    return n_stored
+    if result_rows:
+        await conn.executemany(queries.INSERT_RESULT, result_rows)
+    if round_rows:
+        await conn.executemany(queries.UPSERT_ROUND_RESULT, round_rows)
+    return len(result_rows)
 
 
 async def _get_backfill_state(conn, league_id: int) -> tuple[datetime, datetime] | tuple[None, None]:
@@ -170,7 +182,8 @@ async def _set_backfill_state(conn, league_id: int, anchor: datetime, oldest_cov
 
 
 async def backfill_results(client: HttpClient, conn, league_id: int, site_params: dict[str, object],
-                            *, days_back: int, now: datetime | None = None) -> int:
+                            *, days_back: int, now: datetime | None = None,
+                            should_stop=lambda: False) -> int:
     """Remonte l'historique des résultats fenêtre par fenêtre, en reprenant après une interruption
     grâce à un point de contrôle.
 
@@ -200,6 +213,8 @@ async def backfill_results(client: HttpClient, conn, league_id: int, site_params
 
     n_total = 0
     for window_start, window_end in windows:
+        if should_stop():
+            break  # arrêt demandé (redémarrage, blocage détecté ailleurs) : reprendra à ce point
         games = await fetch_results(client, league_id, window_start, window_end, site_params)
         n_total += await store_results(conn, league_id, games)
         await _set_backfill_state(conn, league_id, anchor, window_start)

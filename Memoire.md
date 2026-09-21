@@ -595,10 +595,91 @@ l'écraser, y compris quand un résultat est ignoré (score illisible) sans fair
   le changer nécessite d'effacer le point de contrôle de cette ligue.
 - Le champ `WT` et le sens exact du drapeau `CE`/`isCenter` restent non interprétés, stockés bruts.
 
-**Prochaine étape : 6, concurrence et reprise complète** (ordonnanceur permanent, deux ligues en
-parallèle, relecture complète de l'état au démarrage, intégration du dictionnaire et des résultats
-dans la boucle de collecte).
+### Étape 6 : ordonnanceur permanent, concurrence, reprise complète (2026-09-21) : terminée
+
+**Fichiers créés** :
+
+| Fichier | Rôle |
+|---|---|
+| `src/collector/scheduler.py` | `Scheduler` : boucles de sondage par ligue, file bornée vers une boucle d'écriture unique, tâches périodiques (dictionnaire, réconciliation), politique de blocage |
+| `src/collector/main.py` | Point d'entrée de production : assemble le tout, gère SIGINT/SIGTERM pour un arrêt propre |
+| `tests/integration/test_scheduler.py` | 7 tests (concurrence, file bornée, reprise, blocage) |
+| `migrations/005_allow_tied_results.sql` | Corrige une hypothèse fausse du schéma (voir plus bas) |
+| `Dockerfile` (cible `runtime`), `docker-compose.yml` (service `scraper`) | Image et service minimaux pour lancer le collecteur (durcissement complet à l'étape 10) |
+
+**Architecture retenue** : les boucles de sondage réseau (une par ligue) et l'écriture en base sont
+découplées par une file bornée (`asyncio.Queue`) et une seule boucle d'écriture. Si l'écriture prend
+du retard, la file se remplit et les producteurs sont mis en attente (contre-pression), sans perte
+de données et sans notification supplémentaire nécessaire. Chaque méthode `*_once` (`poll_once`,
+`write_once`, `refresh_dictionary_once`, `reconcile_results_once`, `backfill_once`) est un pas isolé
+et testable indépendamment du minutage réel ; `run()` les enchaîne en boucles permanentes.
+
+**Un vrai problème de conception trouvé et corrigé avant tout test** : un blocage pendant le
+rattrapage ou la réconciliation des résultats n'était géré nulle part et aurait fait planter tout
+le programme avec une exception non rattrapée, au lieu de s'arrêter proprement. Corrigé avec une
+politique cohérente : un blocage du site principal arrête tout l'ordonnanceur (odds, résultats et
+sondage, qui partagent tous la même identité et la même adresse IP) ; un blocage du CDN du
+dictionnaire n'arrête que le rafraîchissement des libellés, sans affecter la collecte des cotes.
+
+**Un vrai problème de performance trouvé lors d'un essai réel borné dans le temps contre le site**
+(identification honnête, débit d'une requête par seconde comme configuré) : le stockage des
+résultats écrivait chaque résultat et chaque round un par un. Pour une fenêtre de 2 jours (jusqu'à
+environ 578 matchs, section 8), cela représentait plus de mille allers-retours vers la base. Sur
+cette machine de développement ralentie, l'écart entre deux fenêtres de rattrapage a atteint 7 à
+8 minutes, et un plafond de 150 s posé pour l'essai n'a pas suffi à arrêter le programme à temps
+(le conteneur a dû être arrêté manuellement après 25 min). Corrigé : `store_results` regroupe
+maintenant ses écritures (`executemany`), comme le fait déjà l'écriture des cotes. Un second essai,
+réduit à 4 jours de rattrapage, a confirmé la correction : le rattrapage des deux ligues s'est
+terminé en moins de 10 s, suivi d'un passage normal en collecte continue jusqu'à l'arrêt (`timeout`)
+au bout de 60 s. Le rattrapage vérifie désormais aussi une demande d'arrêt entre chaque fenêtre
+(`should_stop`), pour s'interrompre rapidement plutôt que d'aller au bout de toutes les fenêtres
+restantes ; un délai de grâce de 90 s a été ajouté au service Docker en conséquence.
+
+**Une découverte réelle, faite pendant ce même essai, qui a corrigé une hypothèse fausse du
+schéma** : un match Mortal Kombat 3 (`754255087`) s'est terminé **2:2**, une égalité que la
+reconnaissance (section 2.2) supposait impossible pour ce sport, et que le schéma de l'étape 3
+interdisait explicitement (contraintes `results_scores_chk` et `results_winner_chk`). Ce résultat
+était silencieusement perdu (rejeté par `parse_score`, jamais écrit en base), alors que l'objectif
+posé par l'utilisateur est de ne perdre aucune donnée utile au forecasting. Corrigé par la migration
+005 : `winner` devient `NULL` exactement quand `final_score1 = final_score2` (nouvelle contrainte
+`results_winner_tie_chk`), et `parse_score` accepte désormais une égalité au lieu de la rejeter.
+Cette égalité est probablement une interruption ou un incident technique côté site plutôt qu'une
+règle du jeu normale, mais elle est bien réelle et désormais conservée.
+
+**Ce que les tests prouvent** : deux ligues sont sondées et écrites indépendamment sans interférence
+entre leurs détecteurs de changement ; la file bornée met effectivement le producteur en attente
+quand elle est pleine, puis le libère dès qu'une place se dégage ; un redémarrage (nouveaux
+détecteurs vides, préchargement depuis la base) ne réécrit rien de ce qui est déjà connu, mais
+détecte toujours un vrai changement survenu entre-temps ; un blocage arrête l'ordonnanceur sans
+lever d'exception non gérée, aussi bien pour un cycle isolé que pour `run()` dans son ensemble,
+y compris quand le blocage survient dès le tout premier appel (avant même le premier cycle de
+sondage) ; un arrêt explicite (`stop()`, donc un futur SIGTERM) met fin à `run()` en un temps borné ;
+le dictionnaire et la réconciliation des résultats atteignent bien toutes les ligues configurées.
+
+**Résultat** : 117 tests passés, confirmés sur deux exécutions complètes indépendantes, plus un
+essai réel réussi contre le site (rattrapage, sondage des deux ligues, arrêt propre).
+
+**Commandes** (nouvelles depuis l'étape 6) :
+
+```text
+docker compose build scraper                                   # construit l'image du collecteur
+docker compose up scraper                                      # le lance (Ctrl+C pour l'arrêter proprement)
+docker compose run --rm --entrypoint sh scraper -c "timeout 60 python -m collector.main"  # essai borné dans le temps
+```
+
+**Points d'attention pour la suite** :
+- L'image `runtime` est minimale (pas d'utilisateur applicatif dédié en base, pas de restriction
+  réseau) : le durcissement complet reste à l'étape 10.
+- Les alertes ne sont pas encore branchées : un blocage ou une erreur persistante se voit
+  aujourd'hui seulement dans les journaux (`log.critical`), pas encore sur Telegram ou par e-mail.
+  C'est l'objet de l'étape 8.
+- Le score à égalité observé reste un cas isolé (un seul sur l'ensemble des données vues à ce jour) :
+  sa cause exacte (interruption, incident technique, ou règle rare) n'est pas établie.
+
+**Prochaine étape : 7, résilience complète** (source de secours legacy activée automatiquement,
+`ProxyPool`, tests de pannes systématiques : 429, 403, 500, timeout, JSON corrompu, jeton expiré,
+changement de schéma).
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3, 4 et 5 terminées et testées (109 tests)**. Le collecteur s'identifie honnêtement et ne contourne jamais un blocage (section 20). Prochaine étape : 6 (ordonnanceur permanent, concurrence, reprise complète). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 6 terminées et testées (117 tests, plus un essai réel de l'ordonnanceur complet)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, et s'arrête proprement dessus (section 20). Prochaine étape : 7 (résilience complète, tests de pannes). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (pas encore branché, étape 8) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
