@@ -20,6 +20,7 @@ def test_settings_yaml_has_required_transport_fields():
     assert t.user_agent == "OddsCollector/1.0"  # identification fixe, jamais de rotation
     assert t.max_requests_per_second > 0
     assert settings.site_params == {"fcountry": "84", "gr": "2147", "lng": "fr", "ref": "8"}
+    assert settings.legacy_site_params == {"country": "84", "partner": "8", "lng": "fr"}
     assert settings.poll_interval_seconds == 5
     assert settings.dictionary.base_url == "https://v3.cdnafric.com"
     assert settings.results.backfill_days == 90

@@ -225,7 +225,7 @@ Les ligues sont définies dans `config/leagues.yaml` : ajouter une ligue est un 
 | 4. Prototype **(terminée)** | Source v3, parseur, normaliseur, détecteur de changement, écriture pour une ligue | Un match complet stocké, identique à l'enregistrement de référence : **vérifié** (62 tests, voir Memoire.md section 21) |
 | 5. Normalisation et stockage **(terminée)** | Dictionnaire, résultats, rattrapage de l'historique | 45 tests, dont un rattrapage qui reprend correctement après une panne simulée en plein milieu (voir Memoire.md, journal d'étape) |
 | 6. Concurrence **(terminée)** | Deux ligues, file bornée, checkpoints, reprise, ordonnanceur permanent | Redémarrage sans doublon ni trou : **vérifié** (117 tests, plus un essai réel ; voir Memoire.md, journal d'étape) |
-| 7. Résilience | Transport complet, `AntiBotManager`, `ProxyPool`, coupe-circuit, source de secours | Tous les scénarios de panne passent |
+| 7. Résilience **(terminée)** | Transport complet, `ProxyPool`, coupe-circuit, source de secours avec bascule automatique | Tous les scénarios de panne pertinents pour ce site passent (140 tests, plus une vérification réelle de la source de secours ; voir Memoire.md, journal d'étape) |
 | 8. Observabilité | Métriques, tableaux de bord, alertes, watchdog | Alertes reçues sur Telegram et e-mail lors d'une panne simulée |
 | 9. Tests | Couverture unitaire, intégration, pannes | Suite complète verte |
 | 10. Docker | Images, Compose, sauvegardes | `docker compose up` de zéro fonctionne |

@@ -676,10 +676,75 @@ docker compose run --rm --entrypoint sh scraper -c "timeout 60 python -m collect
 - Le score à égalité observé reste un cas isolé (un seul sur l'ensemble des données vues à ce jour) :
   sa cause exacte (interruption, incident technique, ou règle rare) n'est pas établie.
 
-**Prochaine étape : 7, résilience complète** (source de secours legacy activée automatiquement,
-`ProxyPool`, tests de pannes systématiques : 429, 403, 500, timeout, JSON corrompu, jeton expiré,
-changement de schéma).
+### Étape 7 : résilience complète (2026-09-21) : terminée
+
+**Fichiers créés** :
+
+| Fichier | Rôle |
+|---|---|
+| `src/collector/transport/proxypool.py` | `ProxyPool` : rotation, retrait après échecs répétés, restauration automatique. Réalisé mais désactivé par défaut (décision D5) |
+| `src/collector/sources/legacy/models.py`, `client.py`, `adapter.py` | Source de secours : `GetChampZip` + `GetGameZip` (deux appels, contre un seul en v3), traduits vers les mêmes modèles que la source principale |
+| `scripts/check_legacy_live.py` | Vérification manuelle bornée de la source de secours contre le vrai site |
+| `tests/unit/test_proxypool.py`, `test_legacy_adapter.py` | 15 tests supplémentaires |
+| Pannes systématiques ajoutées à `test_http.py` et `test_results.py` | Délai réseau (timeout), JSON corrompu sur l'endpoint des résultats |
+| Bascule automatique dans `scheduler.py` | Voir plus bas |
+
+**Bascule automatique vers la source de secours.** Quand la source principale (v3) ne valide plus
+son schéma (``ParserError`` — changement de structure du site), le cycle en cours n'est pas perdu :
+la réponse brute est archivée dans `dead_letter`, et la ligue bascule immédiatement sur la source de
+secours pour ce cycle et les suivants. Elle y reste, puis retente périodiquement la source
+principale (toutes les 12 cycles par défaut, soit environ 1 min) pour détecter une réparation. Un
+changement de structure **dégrade** la collecte (plus lente : N+1 requêtes au lieu d'une, marchés
+identiques mais assemblés en deux temps), il ne l'arrête jamais — traitement bien distinct d'un
+blocage (403/429), qui arrête tout.
+
+**Une vraie erreur de formule trouvée en écrivant les tests, avant tout lancement contre une base
+réelle** : le décodage du paramètre encodé de la source de secours pour les marchés « durée du
+round » (``P = round × 100 + ligne / 100``) oubliait la multiplication par 100 sur le reste
+(``line = P - round×100`` au lieu de ``(P - round×100) × 100``), sous-évaluant chaque ligne d'un
+facteur 100 (17,5 devenait 0,175). Repérée en confrontant le résultat à un exemple réel documenté à
+la reconnaissance (Memoire.md section 15) pendant la rédaction du test correspondant. Corrigée avant
+qu'aucun test ne tourne dessus.
+
+**Vérifications contre le site réel** : les 140 tests automatisés utilisent des réponses simulées
+ou des échantillons déjà capturés ; en plus, un script dédié (`scripts/check_legacy_live.py`) a
+interrogé la vraie source de secours (2026-09-21) : 5 matchs de Mortal Kombat X récupérés avec leurs
+cotes (19 à 37 par match) en 4,2 s cumulées. Le format `GetChampZip`/`GetGameZip` et le décodage des
+paramètres n'ont pas changé depuis la reconnaissance.
+
+**Pannes couvertes** (voir Memoire.md section 12 et docs/architecture.md §8) : 429 et 403 (arrêt
+total, jamais de contournement, étape 4) ; 500 et autres erreurs 5xx (reprise avec attente
+exponentielle, étape 4) ; délai réseau dépassé (même traitement que 5xx, nouveau test cette étape) ;
+JSON corrompu (source principale, dictionnaire, et désormais résultats, tous testés) ; changement de
+structure du site (bascule automatique, cette étape) ; coupure réseau en plein rattrapage (reprise
+exacte, étape 5). **Non applicable à ce site** : un jeton ou une session expirée, puisqu'aucune
+authentification n'existe (Memoire.md section 4) — le cas le plus proche, un refus explicite du
+site, est déjà couvert par la politique de blocage.
+
+**Composants de l'architecture d'origine restés volontairement non implémentés, avec leur raison** :
+- `SessionManager` : aucune session ni cookie n'est nécessaire pour ce site (confirmé dès la
+  reconnaissance, section 4) ; en écrire un aurait été une coquille vide sans contenu réel à gérer.
+- `BrowserProfileManager` : l'identification est un User-Agent fixe et unique
+  (`OddsCollector/1.0`), déjà en place dans `HttpClient` depuis l'étape 4 ; il n'y a rien à faire
+  tourner (décision explicite de l'utilisateur contre toute rotation, section 20).
+- `ChallengeManager` : aucun défi anti-bot n'a jamais été observé ; l'interface reste vide.
+
+**Résultat** : 140 tests passés, confirmés sur deux exécutions complètes indépendantes, plus une
+vérification réussie de la source de secours contre le site réel.
+
+**Points d'attention pour la suite** :
+- Le `ProxyPool` n'est câblé nulle part dans `HttpClient` (aucun besoin réel constaté) : son usage
+  réel demanderait un client HTTP par proxy actif, httpx liant un proxy à la construction du client
+  et non requête par requête.
+- La source de secours ne reconstitue pas le tableau des rounds (durée, type de finish) : en mode
+  dégradé, seules les cotes et le score global restent à jour, dégradation jugée acceptable et
+  documentée plutôt que cachée.
+- Le seuil de 12 cycles avant un nouvel essai de la source principale est une valeur de départ,
+  jamais mesurée en conditions réelles de panne prolongée.
+
+**Prochaine étape : 8, observabilité et alertes** (métriques Prometheus, tableaux de bord Grafana,
+branchement réel des alertes Telegram et e-mail déjà configurées, script de surveillance externe).
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 6 terminées et testées (117 tests, plus un essai réel de l'ordonnanceur complet)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, et s'arrête proprement dessus (section 20). Prochaine étape : 7 (résilience complète, tests de pannes). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (pas encore branché, étape 8) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 7 terminées et testées (140 tests, plus des vérifications réelles à chaque étape)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours en cas de changement de structure, et s'arrête proprement sur un vrai blocage (section 20). Prochaine étape : 8 (observabilité, alertes). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (configurés, pas encore branchés au code) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).

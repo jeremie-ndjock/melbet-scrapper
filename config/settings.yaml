@@ -22,6 +22,13 @@ site_params:
   lng: fr
   ref: 8
 
+# Source de secours (legacy GetChampZip/GetGameZip, section 2.4). Mêmes valeurs de pays et de
+# partenaire que ci-dessus, sous les noms attendus par cette API plus ancienne.
+legacy_site_params:
+  country: 84
+  partner: 8
+  lng: fr
+
 scheduler:
   poll_interval_seconds: 5
 

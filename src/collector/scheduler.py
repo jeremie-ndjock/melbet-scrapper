@@ -17,6 +17,13 @@ tests sans dépendre du minutage réel ; ``run`` les enchaîne en boucles perman
 Politique de blocage (voir Memoire.md, section 20) : un ``BlockedError`` arrête **tout**
 l'ordonnanceur (toutes les ligues partagent la même identité et la même adresse IP, un blocage les
 concerne donc probablement toutes). Aucune tentative de contournement, aucun changement d'identité.
+
+Politique de changement de structure (source dégradée) : quand la source principale (v3) échoue à
+valider son schéma (``ParserError`` — le site a changé), la réponse brute est archivée
+(``dead_letter``) et la ligue bascule immédiatement sur la source de secours (legacy) pour ne pas
+perdre le cycle en cours. Elle y reste, puis retente périodiquement la source principale (toutes les
+``recovery_probe_cycles`` boucles) pour détecter une éventuelle réparation, sans jamais s'arrêter :
+un changement de structure dégrade, il ne bloque pas.
 """
 from __future__ import annotations
 
@@ -32,10 +39,17 @@ from .dedupe import ChangeDetector
 from .dictionary import MarketDictionary, refresh_unlabeled_markets
 from .pipeline import CycleResult, preload_from_db, process_cycle
 from .results import backfill_results, reconcile_recent
+from .sources.legacy.client import fetch_games_by_champ_legacy
 from .sources.v3.client import fetch_games_by_champ
 from .sources.v3.models import GamesByChampResponse
+from .storage import queries
 from .transport.errors import BlockedError, ParserError, ServerError
 from .transport.http import HttpClient
+
+# Nombre de cycles passés sur la source de secours avant de retenter la source principale.
+DEFAULT_RECOVERY_PROBE_CYCLES = 12  # ~1 min à un cycle de 5 s
+# Taille maximale du payload conservé en lettre morte (les réponses les plus grosses sont tronquées).
+DEAD_LETTER_PAYLOAD_LIMIT = 20_000
 
 log = logging.getLogger("collector.scheduler")
 
@@ -58,6 +72,7 @@ class SchedulerMetrics:
     errors: int = 0
     blocked: bool = False           # blocage du site principal : arrête tout l'ordonnanceur
     dictionary_blocked: bool = False  # blocage du CDN : arrête seulement le rafraîchissement des libellés
+    schema_changes_detected: int = 0  # nombre de bascules vers la source de secours
 
 
 class Scheduler:
@@ -69,20 +84,26 @@ class Scheduler:
         db_pool: asyncpg.Pool,
         leagues: dict[int, str],
         site_params: dict[str, object],
+        legacy_site_params: dict[str, object],
         poll_interval: float,
         queue_maxsize: int = 100,
+        recovery_probe_cycles: int = DEFAULT_RECOVERY_PROBE_CYCLES,
     ):
         self.http = http
         self.cdn_http = cdn_http
         self.db_pool = db_pool
         self.leagues = leagues
         self.site_params = site_params
+        self.legacy_site_params = legacy_site_params
         self.poll_interval = poll_interval
+        self.recovery_probe_cycles = recovery_probe_cycles
         self.queue: asyncio.Queue[CycleJob] = asyncio.Queue(maxsize=queue_maxsize)
         self.detectors: dict[int, ChangeDetector] = {league_id: ChangeDetector() for league_id in leagues}
         self.dictionary = MarketDictionary()
         self.metrics = SchedulerMetrics()
         self._stop = asyncio.Event()
+        self._degraded: set[int] = set()             # ligues actuellement sur la source de secours
+        self._probe_countdown: dict[int, int] = {}    # cycles restants avant de retenter le v3
 
     def stop(self) -> None:
         """Demande un arrêt propre : les boucles en cours terminent leur pas courant, la file
@@ -120,18 +141,70 @@ class Scheduler:
 
     # ------------------------------------------------------------------ pas unitaires (testables)
 
+    async def _fetch_via_legacy(self, league_id: int) -> tuple[GamesByChampResponse, int] | None:
+        try:
+            return await fetch_games_by_champ_legacy(self.http, league_id, self.leagues[league_id], self.legacy_site_params)
+        except BlockedError as exc:
+            self._stop_if_blocked(exc, context=f"source de secours, ligue {league_id}")
+            return None
+        except (ServerError, ParserError) as exc:
+            log.error("source de secours également en échec pour la ligue %s (%s) : %s", league_id, type(exc).__name__, exc)
+            self.metrics.errors += 1
+            return None
+
+    async def _mark_degraded(self, league_id: int, exc: ParserError) -> None:
+        already_degraded = league_id in self._degraded
+        self._degraded.add(league_id)
+        self._probe_countdown[league_id] = self.recovery_probe_cycles
+        if not already_degraded:
+            log.critical(
+                "structure inattendue de la source principale pour la ligue %s (%s) : "
+                "bascule sur la source de secours, nouvel essai dans %d cycle(s)",
+                league_id, exc, self.recovery_probe_cycles,
+            )
+            self.metrics.schema_changes_detected += 1
+        payload = exc.payload[:DEAD_LETTER_PAYLOAD_LIMIT]
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(queries.INSERT_DEAD_LETTER, 1, exc.endpoint, league_id, str(exc), payload, len(exc.payload))
+
     async def poll_once(self, league_id: int) -> bool:
         """Un cycle de sondage pour une ligue : récupère et met en file. Retourne ``False`` si un
-        blocage a été détecté (l'appelant doit alors cesser d'appeler cette méthode)."""
-        try:
-            response, latency_ms = await fetch_games_by_champ(self.http, league_id, self.site_params)
-        except BlockedError as exc:
-            self._stop_if_blocked(exc, context=f"sondage, ligue {league_id}")
-            return False
-        except (ServerError, ParserError) as exc:
-            log.error("cycle ignoré pour la ligue %s (%s) : %s", league_id, type(exc).__name__, exc)
-            self.metrics.errors += 1
-            return True
+        blocage a été détecté (l'appelant doit alors cesser d'appeler cette méthode).
+
+        Bascule automatiquement sur la source de secours si la source principale ne valide plus son
+        schéma (changement de structure du site), et retente périodiquement la source principale
+        une fois dégradée (voir le en-tête du module)."""
+        probing_recovery = False
+        if league_id in self._degraded:
+            self._probe_countdown[league_id] -= 1
+            probing_recovery = self._probe_countdown[league_id] <= 0
+
+        if league_id not in self._degraded or probing_recovery:
+            try:
+                response, latency_ms = await fetch_games_by_champ(self.http, league_id, self.site_params)
+            except BlockedError as exc:
+                self._stop_if_blocked(exc, context=f"sondage, ligue {league_id}")
+                return False
+            except ParserError as exc:
+                await self._mark_degraded(league_id, exc)
+                result = await self._fetch_via_legacy(league_id)
+                if result is None:
+                    return not self.stopping
+                response, latency_ms = result
+            except ServerError as exc:
+                log.error("cycle ignoré pour la ligue %s (%s) : %s", league_id, type(exc).__name__, exc)
+                self.metrics.errors += 1
+                return True
+            else:
+                if probing_recovery:
+                    log.warning("source principale rétablie pour la ligue %s : fin de la dégradation", league_id)
+                    self._degraded.discard(league_id)
+        else:
+            result = await self._fetch_via_legacy(league_id)
+            if result is None:
+                return not self.stopping
+            response, latency_ms = result
+
         await self.queue.put(CycleJob(league_id, response, datetime.now(timezone.utc), latency_ms))
         return True
 

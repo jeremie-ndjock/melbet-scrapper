@@ -53,6 +53,7 @@ class ResultsConfig:
 class Settings:
     transport: TransportConfig
     site_params: dict[str, str]
+    legacy_site_params: dict[str, str]
     dictionary: DictionaryConfig
     results: ResultsConfig
     poll_interval_seconds: float = 5.0
@@ -88,6 +89,7 @@ def load_settings(path: Path | None = None) -> Settings:
     return Settings(
         transport=transport,
         site_params={str(k): str(v) for k, v in data["site_params"].items()},
+        legacy_site_params={str(k): str(v) for k, v in data["legacy_site_params"].items()},
         dictionary=DictionaryConfig(**data["dictionary"]),
         results=ResultsConfig(**data.get("results", {})),
         poll_interval_seconds=float(data.get("scheduler", {}).get("poll_interval_seconds", 5)),

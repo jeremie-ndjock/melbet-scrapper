@@ -1,11 +1,16 @@
 """Tests de l'analyse du score et du découpage en fenêtres du rattrapage d'historique."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 
-from collector.results import ResultParseError, align_down, iter_windows, parse_score
+from collector.results import ResultParseError, align_down, fetch_results, iter_windows, parse_score
+from collector.transport.errors import ParserError
+from collector.transport.http import HttpClient, RetryConfig
+from collector.transport.ratelimit import RateLimiter
 
 
 def test_parse_score_mortal_kombat_x_without_mercy_suffix():
@@ -88,3 +93,27 @@ def test_iter_windows_respects_two_day_cap_even_for_a_short_range():
     windows = iter_windows(end=datetime.now(timezone.utc), days_back=1)
     assert len(windows) == 1
     assert windows[0][1] - windows[0][0] <= timedelta(days=1) + timedelta(minutes=5)
+
+
+async def test_fetch_results_rejects_corrupt_json():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text="{ceci n'est pas du JSON valide")
+
+    client = HttpClient("https://melbet.test", "OddsCollector/1.0", rate_limiter=RateLimiter(1000),
+                         retry=RetryConfig(max_attempts=1),
+                         client=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://melbet.test"))
+    now = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    with pytest.raises(ParserError):
+        await fetch_results(client, 1252965, now - timedelta(days=1), now, {"lng": "fr"})
+
+
+async def test_fetch_results_rejects_unexpected_schema():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=json.dumps({"items": [{"pas_les_bons_champs": True}]}))
+
+    client = HttpClient("https://melbet.test", "OddsCollector/1.0", rate_limiter=RateLimiter(1000),
+                         retry=RetryConfig(max_attempts=1),
+                         client=httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://melbet.test"))
+    now = datetime(2026, 9, 21, tzinfo=timezone.utc)
+    with pytest.raises(ParserError):
+        await fetch_results(client, 1252965, now - timedelta(days=1), now, {"lng": "fr"})

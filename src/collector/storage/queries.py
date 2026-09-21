@@ -93,3 +93,10 @@ VALUES ($1, $2, $3::jsonb)
 ON CONFLICT (worker, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 """
 SELECT_CHECKPOINT = "SELECT value FROM checkpoints WHERE worker = $1 AND key = $2"
+
+# Réponse en échec de validation de schéma (voir transport/errors.py ParserError et scheduler.py).
+# Le payload est tronqué à l'écriture (voir scheduler.py) : payload_bytes garde la taille d'origine.
+INSERT_DEAD_LETTER = """
+INSERT INTO dead_letter (source, endpoint, league_id, error, payload, payload_bytes)
+VALUES ($1, $2, $3, $4, $5, $6)
+"""

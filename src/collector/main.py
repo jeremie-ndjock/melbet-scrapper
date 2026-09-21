@@ -43,7 +43,8 @@ async def amain() -> int:
 
     scheduler = Scheduler(
         http=http, cdn_http=cdn_http, db_pool=db_pool, leagues=leagues,
-        site_params=settings.site_params, poll_interval=settings.poll_interval_seconds,
+        site_params=settings.site_params, legacy_site_params=settings.legacy_site_params,
+        poll_interval=settings.poll_interval_seconds,
     )
 
     loop = asyncio.get_running_loop()

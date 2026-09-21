@@ -67,6 +67,29 @@ async def test_persistent_server_error_raises_after_max_attempts():
         await client.get("/x", {})
 
 
+async def test_timeout_is_retried_then_succeeds():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise httpx.TimeoutException("délai dépassé (simulé)")
+        return httpx.Response(200, text='{"ok": true}')
+
+    client = make_client(handler, retry=RetryConfig(max_attempts=3, base_delay_seconds=0.001, max_delay_seconds=0.01))
+    result = await client.get("/x", {})
+    assert result.status_code == 200 and calls["n"] == 2
+
+
+async def test_persistent_timeout_raises_server_error_not_blocked():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.TimeoutException("délai dépassé (simulé)")
+
+    client = make_client(handler, retry=RetryConfig(max_attempts=2, base_delay_seconds=0.001, max_delay_seconds=0.01))
+    with pytest.raises(ServerError):  # transitoire : jamais confondu avec un blocage
+        await client.get("/x", {})
+
+
 async def test_403_raises_blocked_error_immediately_without_retry():
     calls = {"n": 0}
 
