@@ -564,7 +564,7 @@ class RecordingSender:
         self.chat_id = "-1"
         self._next_id = 5000
 
-    async def send_or_edit(self, message_id, text):
+    async def send_or_edit(self, chat_id, message_id, text):
         if message_id is not None:
             self.edited.append((message_id, text))
             return message_id
@@ -580,14 +580,14 @@ async def test_live_feed_sends_a_telegram_update_after_a_completed_round(db_pool
     melbet.score[MK_X] = (1, 0)
     melbet.round_table[MK_X * 10] = [{"R": 1, "T": 31, "W": "A", "DI": "Regular", "WT": "0", "FW": False}]
     sender = RecordingSender()
-    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_id="-1")
+    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_ids={MK_X: "-1"})
     sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, live_feed=live_feed)
 
     await sched.poll_once(MK_X)
     await sched.write_once()
 
     assert len(sender.sent) == 1
-    assert "Manche 1 : vainqueur A" in sender.sent[0]
+    assert "💥 Manche 1 : Vainqueur A" in sender.sent[0]
     assert melbet.statistic_calls == [MK_X * 10]
 
 
@@ -596,7 +596,7 @@ async def test_live_feed_does_not_call_statistic_when_the_score_has_not_changed(
 
     melbet = FakeMelbet()  # score 0-0 par défaut : aucune manche terminée
     sender = RecordingSender()
-    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_id="-1")
+    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_ids={MK_X: "-1"})
     sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, live_feed=live_feed)
 
     await sched.poll_once(MK_X)
@@ -614,7 +614,7 @@ async def test_live_feed_blocked_stops_the_scheduler_but_keeps_the_cycle_result(
     melbet = FakeMelbet()
     melbet.score[MK_X] = (1, 0)
     sender = RecordingSender()
-    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_id="-1")
+    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_ids={MK_X: "-1"})
     sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, live_feed=live_feed)
 
     await sched.poll_once(MK_X)

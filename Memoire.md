@@ -998,7 +998,7 @@ et alerting branchés.
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et testées (234 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape) — le collecteur tourne en production réelle sur un VPS AWS (eu-west-3, m7i-flex.large)**. Le site répond normalement depuis cette IP réelle (aucun blocage observé). Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Nouveau (2026-09-22) : fil de match Telegram en direct, une mise à jour par manche (ligue, numéro du match du jour, vainqueur, temps, type de finishing), déployé et vérifié en production sur le VPS (4 matchs suivis en direct).** Points ouverts : IP Elastic à allouer, budget AWS à confirmer, réception des alertes depuis le VPS à confirmer. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés depuis la machine locale) ; fil de match Telegram sur un salon dédié (déployé et vérifié en production) ; sauvegardes quotidiennes sur le VPS (vérifiées en conditions réelles) et récupération par l'utilisateur.
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées (254 tests, couverture 95 % en branches, plus des vérifications réelles à chaque étape)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Fil de match Telegram en direct** : un salon dédié par ligue, numéro de match du jour (calculé, combine résultats et matchs en direct), format à emojis, et une annonce pré-match avec portraits des combattants et compte à rebours — tout vérifié avec de vrais envois réels, code poussé sur GitHub. **VPS injoignable en SSH depuis cette session (à vérifier côté utilisateur, console AWS) : le dernier lot de code (salons séparés, numéro corrigé, portraits) n'est pas encore déployé dessus.** Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés) ; fil de match Telegram sur un salon dédié par ligue (vérifié en conditions réelles) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur.
 
 ## 22. Clôture de session — 2026-09-22
 
@@ -1143,3 +1143,80 @@ et n'auront jamais de numéro affiché pour ce match précis — `format_match_m
 simplement la ligne « Match n°X » quand la valeur est absente (jamais de plantage, jamais de
 « None » affiché). Se résorbe de lui-même : tout match qui démarre après ce déploiement obtient
 son numéro normalement, comme vérifié manuellement.
+
+### Complément demandé le même jour : salons séparés, numéro exact, format à emojis, annonce pré-match avec portraits
+
+L'utilisateur a fourni une capture montrant le vrai numéro de match affiché par le site (232, 233,
+234) et demandé quatre choses : un salon Telegram séparé par ligue, le vrai numéro de rang du jour
+(pas une approximation), un format de message précis (emojis donnés en exemple), et une annonce
+avant chaque match avec les portraits des deux combattants et un compte à rebours.
+
+**Un vrai problème de méthode trouvé avant de coder** : le numéro affiché par le site (232-234)
+n'existe dans **aucun champ** de l'API interrogée — vérifié en listant tous les entiers de 0 à
+5000 présents dans une vraie réponse `gamesByChamp` sur des matchs en direct, sans résultat
+plausible. Le calcul déjà en place (rang parmi les matchs de la ligue commençant le même jour,
+voir plus haut) restait donc la seule option, mais avec un vrai défaut : il ne comptait que les
+matchs vus par ce collecteur depuis son démarrage, pas depuis minuit — sous-évalué juste après un
+déploiement en cours de journée. **Corrigé** en combinant `results` (rattrapage historique,
+couvre toute la journée même avant le premier démarrage) et `events` (matchs en direct) dans le
+calcul (`UNION`, requête `COUNT_LEAGUE_MATCHES_UP_TO` mise à jour) : le numéro se rapproche
+désormais de celui du site dès le premier jour de fonctionnement continu, et devient exact à
+partir du deuxième jour (le premier restera légèrement sous-évalué pour les toutes premières
+heures suivant un déploiement, ce qui est accepté).
+
+**Salons séparés par ligue** : l'utilisateur a renommé le groupe existant en « Mortal Kombat X »
+et créé un nouveau groupe « Mortal Kombat 3 ». `MatchFeedConfig.chat_ids` devient un dictionnaire
+`{league_id: chat_id}` lu depuis des variables `TELEGRAM_MATCH_CHAT_ID_<league_id>` (une ligue
+sans variable définie n'a simplement pas son fil, les autres continuent). `MatchFeedSender` ne
+fixe plus le salon à la construction : chaque appel (`send`, `edit`, `send_or_edit`) le reçoit en
+paramètre, un seul envoyeur suffisant pour toutes les ligues.
+
+**Nouveau format exact** (emojis fournis par l'utilisateur) :
+```
+🎮 MORTAL KOMBAT 3
+📅 Match n°27 — Journée du 22-09-2026
+🥊 Liu Kang VS Kung Lao
+
+💥 Manche 1 : Vainqueur Liu Kang — ⏱️ 22s — 💀 Fatality [Score : 1-0]
+...
+🏆 VAINQUEUR DU MATCH : Liu Kang (5-1)
+```
+Emoji par type de finishing (Regular 🥊, Fatality 💀, Brutality 🔥, Babality 👶, Friendship 🤝,
+Animality 🐾, Hara-Kiri 🗡️) ; un type inconnu affiche ❓ plutôt que de planter.
+
+**Annonce pré-match avec portraits** (fonctionnalité neuve, `pre_match.py`, `fighter_images.py`) :
+- L'utilisateur a fourni 49 images (une par combattant distinct des deux ligues sur 1 145 matchs
+  réels analysés — 33 pour Mortal Kombat X, 16 supplémentaires propres à Mortal Kombat 3, les 16
+  autres étant des combattants communs aux deux jeux). Stockées dans `assets/fighters/`, indexées
+  par le nom exact renvoyé par le site (`_mapping.json`), embarquées dans l'image Docker.
+- **Piège d'encodage réel rencontré en les enregistrant** (déjà documenté section 20 du journal
+  d'étape 11 pour un autre fichier) : une commande shell avec un nom accentué (« Prédateur ») a
+  affiché un caractère corrompu à l'écran — vérifié que le fichier JSON lui-même restait correct
+  en UTF-8 (lecture des octets bruts), donc pas de vrai bug, seulement un problème d'affichage
+  terminal. Un test dédié (`test_accented_fighter_names_round_trip_correctly`) verrouille ce point.
+- **Découverte qui a évité un calcul superflu** : le compte à rebours avant un match n'a pas besoin
+  d'être recalculé depuis `startTs` — le site l'expose déjà lui-même
+  (`scores.timer.timeSec`/`timeDirection == -1`), dans le relevé `gamesByChamp` déjà récupéré à
+  chaque cycle. Réutilisé tel quel : plus fiable (fait foi côté site) et sans appel réseau
+  supplémentaire. Champ `timeDirection` ajouté au modèle `Timer` (jamais déclaré avant).
+- Un message par match, distinct du fil manche par manche (deux messages séparés, pas le même
+  message qui se transforme) : portraits des deux combattants en album (`sendMediaGroup`) avec
+  légende « Commence dans MM:SS », éditée au plus une fois toutes les 10 s (demandé explicitement),
+  jusqu'au démarrage du match (dernière édition : « Le match commence ! »). Un combattant sans
+  image connue ne bloque rien : retombe sur une seule photo, ou sur du texte si aucune des deux
+  images n'existe.
+- Nouvelle table `match_announcements` (migration 008), distincte de `match_feed` : suit le
+  message d'annonce (identifiant, si c'était une photo ou du texte simple — `editMessageCaption`
+  et `editMessageText` ne sont pas interchangeables côté Telegram —, dernier temps affiché, état
+  terminé).
+
+**Résultat** : 254 tests au total (+20), couverture 95 % maintenue. Vérifié en conditions réelles :
+un vrai message de résultat envoyé sur chacun des deux nouveaux salons séparés (numéro de test
+provisoire, le vrai numéro nécessitant un peu d'historique accumulé) ; une vraie annonce pré-match
+envoyée avec les vrais portraits (« images: True True » confirmé) sur un vrai match à venir de
+chaque ligue.
+
+**En attente à la clôture de cette session** : le VPS est devenu injoignable en SSH (timeout au
+niveau TCP, pas un problème d'identifiants) pendant cette session de travail — à vérifier côté
+utilisateur dans la console AWS (état de l'instance, groupe de sécurité). Le code est prêt, testé
+et poussé sur GitHub ; le déploiement sur le VPS reste à faire dès que l'accès est rétabli.

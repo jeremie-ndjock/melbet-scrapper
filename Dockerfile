@@ -27,6 +27,9 @@ FROM base AS runtime
 COPY src ./src
 COPY config ./config
 COPY migrations ./migrations
+# Portraits des combattants (annonce pré-match, voir fighter_images.py) : dossier facultatif, une
+# image manquante ne bloque jamais rien, mais quand il existe il doit être embarqué dans l'image.
+COPY assets ./assets
 ENV PYTHONPATH=/app/src
 USER app
 CMD ["python", "-m", "collector.main"]

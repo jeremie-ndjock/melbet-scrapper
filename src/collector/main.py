@@ -18,6 +18,7 @@ from .config import load_leagues, load_settings
 from .live_feed import LiveFeedProcessor
 from .observability.logging_setup import configure_logging
 from .observability.metrics import REGISTRY
+from .pre_match import PreMatchAnnouncer
 from .scheduler import Scheduler
 from .storage.migrate import migrate
 from .telegram_feed import MatchFeedSender, load_match_feed_config_from_env
@@ -66,17 +67,22 @@ async def amain() -> int:
 
     match_feed_config = load_match_feed_config_from_env()
     live_feed = None
+    pre_match = None
     if match_feed_config.enabled:
+        feed_sender = MatchFeedSender(match_feed_config.bot_token)
         live_feed = LiveFeedProcessor(
             http=http, site_params=settings.site_params,
-            sender=MatchFeedSender(match_feed_config), chat_id=match_feed_config.chat_id,
+            sender=feed_sender, chat_ids=match_feed_config.chat_ids,
         )
-        log.info("fil de match en direct activé (Telegram)")
+        pre_match = PreMatchAnnouncer(sender=feed_sender, chat_ids=match_feed_config.chat_ids)
+        log.info("fil de match en direct activé (Telegram) pour %d ligue(s) : %s",
+                 len(match_feed_config.chat_ids), sorted(match_feed_config.chat_ids))
 
     scheduler = Scheduler(
         http=http, cdn_http=cdn_http, db_pool=db_pool, leagues=leagues,
         site_params=settings.site_params, legacy_site_params=settings.legacy_site_params,
-        poll_interval=settings.poll_interval_seconds, alerter=alerter, live_feed=live_feed,
+        poll_interval=settings.poll_interval_seconds, alerter=alerter,
+        live_feed=live_feed, pre_match=pre_match,
     )
 
     loop = asyncio.get_running_loop()

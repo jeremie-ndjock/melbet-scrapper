@@ -132,8 +132,33 @@ WHERE game_id = $1
 
 # Rang du match parmi ceux de la même ligue commençant le même jour (UTC), par heure de début
 # croissante — voir migrations/007_match_feed_match_number.sql pour le choix de ce calcul plutôt
-# que le champ `num` du site (un identifiant interne, pas un compteur journalier).
+# que le champ `num` du site (un identifiant interne, pas un compteur journalier). Combine
+# `results` (rattrapage historique : couvre toute la journée même avant le premier démarrage du
+# collecteur) et `events` (matchs en direct pas encore reconciliés dans `results`) ; l'UNION
+# élimine naturellement un même match compté deux fois (même horodatage de début dans les deux
+# tables, deux matchs distincts de la même ligue démarrant à la même seconde étant par
+# construction impossible, cf. cadence de 5 min).
 COUNT_LEAGUE_MATCHES_UP_TO = """
-SELECT count(*) FROM events
-WHERE league_id = $1 AND start_ts >= $2 AND start_ts <= $3
+SELECT count(*) FROM (
+    SELECT date_start AS ts FROM results WHERE league_id = $1 AND date_start >= $2 AND date_start <= $3
+    UNION
+    SELECT start_ts AS ts FROM events WHERE league_id = $1 AND start_ts >= $2 AND start_ts <= $3
+) combined
+"""
+
+# Annonce pré-match (voir pre_match.py et migrations/008_match_announcements.sql).
+SELECT_MATCH_ANNOUNCEMENT = """
+SELECT message_id, is_photo, last_seconds, done FROM match_announcements WHERE game_id = $1
+"""
+
+INSERT_MATCH_ANNOUNCEMENT = """
+INSERT INTO match_announcements (game_id, chat_id)
+VALUES ($1, $2)
+ON CONFLICT (game_id) DO NOTHING
+"""
+
+UPDATE_MATCH_ANNOUNCEMENT = """
+UPDATE match_announcements
+SET message_id = $2, is_photo = $3, last_seconds = $4, last_edited_at = now(), done = $5
+WHERE game_id = $1
 """

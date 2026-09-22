@@ -13,7 +13,7 @@ from collector.live_feed import LiveFeedProcessor
 from collector.sources.v3.models import Game, GamesByChampResponse
 from collector.storage import queries
 from collector.storage.writer import upsert_event
-from collector.telegram_feed import MatchFeedSender, MatchFeedConfig
+from collector.telegram_feed import MatchFeedSender
 from collector.transport.errors import BlockedError, ParserError, ServerError
 from collector.transport.http import HttpClient, RetryConfig
 from collector.transport.ratelimit import RateLimiter
@@ -62,17 +62,17 @@ def make_http(handler) -> HttpClient:
 
 class FakeSender(MatchFeedSender):
     def __init__(self):
-        super().__init__(MatchFeedConfig(bot_token="t", chat_id="-1"))
+        super().__init__("t")
         self.sent: list[str] = []
         self.edited: list[tuple[int, str]] = []
         self._next_id = 1000
 
-    async def send(self, text: str) -> int | None:
+    async def send(self, chat_id: str, text: str) -> int | None:
         self.sent.append(text)
         self._next_id += 1
         return self._next_id
 
-    async def edit(self, message_id: int, text: str) -> bool:
+    async def edit(self, chat_id: str, message_id: int, text: str) -> bool:
         self.edited.append((message_id, text))
         return True
 
@@ -85,14 +85,14 @@ async def test_first_completed_round_sends_a_new_message_and_fills_round_results
     stat = FakeStatistic()
     stat.rounds = [{"R": 1, "T": 31, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False}]
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(1, 0)
     await _seed_event(db, game)
     await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
     assert len(sender.sent) == 1
-    assert "Manche 1 : vainqueur Goro, temps: 31 secondes, Type de finishing: Regular" in sender.sent[0]
+    assert "💥 Manche 1 : Vainqueur Goro — ⏱️ 31s — 🥊 Regular [Score : 1-0]" in sender.sent[0]
     row = await db.fetchrow("SELECT winner, seconds, finish_di, wt, fw FROM round_results WHERE game_id = $1 AND round_no = 1", GAME_ID)
     assert row["winner"] == 1 and row["seconds"] == 31 and row["finish_di"] == "Regular" and row["fw"] is False
     feed = await db.fetchrow(queries.SELECT_MATCH_FEED, GAME_ID)
@@ -103,7 +103,7 @@ async def test_second_completed_round_edits_the_existing_message(db):
     stat = FakeStatistic()
     stat.rounds = [{"R": 1, "T": 31, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False}]
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(1, 0)
     await _seed_event(db, game)
@@ -118,15 +118,15 @@ async def test_second_completed_round_edits_the_existing_message(db):
     assert len(sender.edited) == 1
     edited_id, edited_text = sender.edited[0]
     assert edited_id == first_message_id
-    assert "Manche 2 : vainqueur Ermac" in edited_text
-    assert "score 1-1" in edited_text
+    assert "💥 Manche 2 : Vainqueur Ermac" in edited_text
+    assert "[Score : 1-1]" in edited_text
 
 
 async def test_no_new_round_does_not_call_statistic_again(db):
     stat = FakeStatistic()
     stat.rounds = [{"R": 1, "T": 31, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False}]
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(1, 0)
     await _seed_event(db, game)
@@ -142,7 +142,7 @@ async def test_no_new_round_does_not_call_statistic_again(db):
 async def test_match_not_yet_started_is_skipped_without_calling_statistic(db):
     stat = FakeStatistic()
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(0, 0, period_name="1er round")
     await _seed_event(db, game)
@@ -159,7 +159,7 @@ async def test_statistic_lagging_behind_the_score_is_retried_next_cycle(db):
     stat = FakeStatistic()
     stat.rounds = []  # score dit 1-0 mais le tableau des rounds n'a pas encore rattrapé
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(1, 0)
     await _seed_event(db, game)
@@ -175,13 +175,13 @@ async def test_match_finished_is_recorded_and_announces_the_winner(db):
     stat = FakeStatistic()
     stat.rounds = [{"R": i, "T": 30, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False} for i in range(1, 6)]
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(5, 0, period_name="Jeu terminé")
     await _seed_event(db, game)
     await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
-    assert "🏆 Vainqueur du match : Goro (5-0)" in sender.sent[0]
+    assert "🏆 VAINQUEUR DU MATCH : Goro (5-0)" in sender.sent[0]
     finished = await db.fetchval("SELECT match_finished FROM match_feed WHERE game_id = $1", GAME_ID)
     assert finished is True
 
@@ -193,7 +193,7 @@ async def test_finished_label_arriving_a_cycle_later_still_updates_match_finishe
     stat = FakeStatistic()
     stat.rounds = [{"R": i, "T": 30, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False} for i in range(1, 6)]
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(5, 0, period_name="5ème round")  # score final déjà atteint, libellé pas encore mis à jour
     await _seed_event(db, game)
@@ -215,7 +215,7 @@ async def test_a_blocked_statistic_endpoint_propagates_blocked_error(db):
     stat = FakeStatistic()
     stat.blocked = True
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(1, 0)
     await _seed_event(db, game)
@@ -227,7 +227,7 @@ async def test_a_transient_statistic_error_is_tolerated_for_this_game_only(db, c
     def broken(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500)
     sender = FakeSender()
-    proc = LiveFeedProcessor(http=make_http(broken), site_params={}, sender=sender, chat_id="-1")
+    proc = LiveFeedProcessor(http=make_http(broken), site_params={}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
 
     game = _game(1, 0)
     await _seed_event(db, game)

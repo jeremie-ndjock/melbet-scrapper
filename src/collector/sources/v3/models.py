@@ -34,6 +34,11 @@ class EventGroup(Lenient):
 
 class Timer(Lenient):
     timeSec: int | None = None
+    # -1 = compte à rebours avant le début du match (timeSec décroît) ; 0 = match en cours ou
+    # terminé (timeSec = temps écoulé, croissant). Confirmé en conditions réelles (Memoire.md,
+    # section « fil de match en direct ») : réutilisé pour l'annonce pré-match plutôt que de
+    # recalculer nous-mêmes un compte à rebours (celui du site fait déjà foi).
+    timeDirection: int | None = None
 
 
 class FullScoreDetail(Lenient):
