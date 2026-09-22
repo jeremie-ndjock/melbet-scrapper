@@ -57,6 +57,12 @@ class FakeMelbet:
         # Simule un changement de structure du site : gamesByChamp renvoie un JSON qui ne valide
         # plus le schéma attendu (comme si un champ requis avait disparu ou changé de forme).
         self.v3_schema_broken = False
+        # Score courant par ligue (0-0 par défaut) et tableau des rounds pour /v3/statistic,
+        # utilisés par les tests du fil de match en direct (voir test_live_feed_*).
+        self.score: dict[int, tuple[int, int]] = {}
+        self.round_table: dict[int, list[dict]] = {}
+        self.period_name: dict[int, str] = {}
+        self.statistic_calls: list[int] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         q = parse_qs(request.url.query.decode())
@@ -71,6 +77,12 @@ class FakeMelbet:
             game_id = int(q["id"][0])
             champ_id = game_id // 10
             return httpx.Response(200, text=json.dumps(_game_zip_body(game_id, self.cf[champ_id])))
+        if "v3/statistic" in request.url.path:
+            game_id = int(q["gameId"][0])
+            self.statistic_calls.append(game_id)
+            body = {"fullScoreDetail": {"scoreOpp1": 0, "scoreOpp2": 0},
+                    "statistic": {"main": {"RoundTable": json.dumps(self.round_table.get(game_id, []))}}}
+            return httpx.Response(200, text=json.dumps(body))
         if "gamesByChamp" in request.url.path:
             champ_id = int(q["champId"][0])
             self.games_calls.append(champ_id)
@@ -79,8 +91,13 @@ class FakeMelbet:
                 body = {"liga": {"id": champ_id, "name": "x"}, "gamesCount": 1,
                         "games": [{k: v for k, v in _game(champ_id * 10, self.cf[champ_id]).items() if k != "id"}]}
             else:
-                body = {"liga": {"id": champ_id, "name": "x"}, "gamesCount": 1,
-                        "games": [_game(champ_id * 10, self.cf[champ_id])]}
+                game = _game(champ_id * 10, self.cf[champ_id])
+                s1, s2 = self.score.get(champ_id, (0, 0))
+                game["scores"]["fullScoreDetail"] = {"scoreOpp1": s1, "scoreOpp2": s2}
+                game["scores"]["fullScore"] = f"{s1}-{s2}"
+                if champ_id in self.period_name:
+                    game["scores"]["currentPeriodName"] = self.period_name[champ_id]
+                body = {"liga": {"id": champ_id, "name": "x"}, "gamesCount": 1, "games": [game]}
             return httpx.Response(200, text=json.dumps(body))
         if "result/web/api/v3/games" in request.url.path:
             return httpx.Response(200, text=json.dumps({"count": 0, "items": []}))
@@ -116,12 +133,12 @@ class FakeAlerter:
 
 
 def make_scheduler(db_pool, melbet: FakeMelbet, cdn: FakeCdn, *, leagues=None, queue_maxsize=100,
-                    recovery_probe_cycles=12, alerter=None) -> Scheduler:
+                    recovery_probe_cycles=12, alerter=None, live_feed=None) -> Scheduler:
     return Scheduler(
         http=make_http(melbet.handler), cdn_http=make_http(cdn.handler), db_pool=db_pool,
         leagues=leagues or LEAGUES, site_params=SITE_PARAMS, legacy_site_params=SITE_PARAMS,
         poll_interval=5.0, queue_maxsize=queue_maxsize, recovery_probe_cycles=recovery_probe_cycles,
-        alerter=alerter,
+        alerter=alerter, live_feed=live_feed,
     )
 
 
@@ -534,3 +551,77 @@ async def test_failed_cycle_is_recorded_in_collection_log_as_not_ok(db_pool):
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT ok, error FROM collection_log WHERE league_id = $1", MK_X)
     assert row["ok"] is False and row["error"] is not None
+
+
+# ---------------------------------------------------------------- fil de match en direct (2026-09-22)
+
+class RecordingSender:
+    """Remplace ``MatchFeedSender`` : enregistre les envois/éditions sans réseau réel."""
+
+    def __init__(self):
+        self.sent: list[str] = []
+        self.edited: list[tuple[int, str]] = []
+        self.chat_id = "-1"
+        self._next_id = 5000
+
+    async def send_or_edit(self, message_id, text):
+        if message_id is not None:
+            self.edited.append((message_id, text))
+            return message_id
+        self._next_id += 1
+        self.sent.append(text)
+        return self._next_id
+
+
+async def test_live_feed_sends_a_telegram_update_after_a_completed_round(db_pool):
+    from collector.live_feed import LiveFeedProcessor
+
+    melbet = FakeMelbet()
+    melbet.score[MK_X] = (1, 0)
+    melbet.round_table[MK_X * 10] = [{"R": 1, "T": 31, "W": "A", "DI": "Regular", "WT": "0", "FW": False}]
+    sender = RecordingSender()
+    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_id="-1")
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, live_feed=live_feed)
+
+    await sched.poll_once(MK_X)
+    await sched.write_once()
+
+    assert len(sender.sent) == 1
+    assert "Manche 1 : vainqueur A" in sender.sent[0]
+    assert melbet.statistic_calls == [MK_X * 10]
+
+
+async def test_live_feed_does_not_call_statistic_when_the_score_has_not_changed(db_pool):
+    from collector.live_feed import LiveFeedProcessor
+
+    melbet = FakeMelbet()  # score 0-0 par défaut : aucune manche terminée
+    sender = RecordingSender()
+    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_id="-1")
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, live_feed=live_feed)
+
+    await sched.poll_once(MK_X)
+    await sched.write_once()
+
+    assert sender.sent == []
+    assert melbet.statistic_calls == []
+
+
+async def test_live_feed_blocked_stops_the_scheduler_but_keeps_the_cycle_result(db_pool):
+    """Un blocage détecté par le fil de match doit arrêter l'ordonnanceur (même politique que
+    partout ailleurs), sans pour autant perdre les cotes déjà écrites par ce même cycle."""
+    from collector.live_feed import LiveFeedProcessor
+
+    melbet = FakeMelbet()
+    melbet.score[MK_X] = (1, 0)
+    sender = RecordingSender()
+    live_feed = LiveFeedProcessor(http=make_http(melbet.handler), site_params=SITE_PARAMS, sender=sender, chat_id="-1")
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, live_feed=live_feed)
+
+    await sched.poll_once(MK_X)
+    melbet.blocked = True  # le blocage survient au moment de l'appel /v3/statistic dans write_once
+
+    result = await sched.write_once()
+
+    assert result is not None and result.n_games == 1  # le cycle a bien été écrit
+    assert sched.stopping is True
+    assert sched.metrics.blocked is True

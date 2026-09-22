@@ -15,10 +15,12 @@ from prometheus_client import start_http_server
 
 from .alerting import AlertSender, ThrottledAlerter, load_alert_config_from_env
 from .config import load_leagues, load_settings
+from .live_feed import LiveFeedProcessor
 from .observability.logging_setup import configure_logging
 from .observability.metrics import REGISTRY
 from .scheduler import Scheduler
 from .storage.migrate import migrate
+from .telegram_feed import MatchFeedSender, load_match_feed_config_from_env
 from .transport.http import HttpClient
 from .transport.ratelimit import CircuitBreaker, RateLimiter
 
@@ -62,10 +64,19 @@ async def amain() -> int:
         retry=t.retry, source_label="cdn",
     )
 
+    match_feed_config = load_match_feed_config_from_env()
+    live_feed = None
+    if match_feed_config.enabled:
+        live_feed = LiveFeedProcessor(
+            http=http, site_params=settings.site_params,
+            sender=MatchFeedSender(match_feed_config), chat_id=match_feed_config.chat_id,
+        )
+        log.info("fil de match en direct activé (Telegram)")
+
     scheduler = Scheduler(
         http=http, cdn_http=cdn_http, db_pool=db_pool, leagues=leagues,
         site_params=settings.site_params, legacy_site_params=settings.legacy_site_params,
-        poll_interval=settings.poll_interval_seconds, alerter=alerter,
+        poll_interval=settings.poll_interval_seconds, alerter=alerter, live_feed=live_feed,
     )
 
     loop = asyncio.get_running_loop()

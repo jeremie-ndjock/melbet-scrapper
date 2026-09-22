@@ -38,6 +38,7 @@ import asyncpg
 from .alerting import ThrottledAlerter
 from .dedupe import ChangeDetector
 from .dictionary import MarketDictionary, refresh_unlabeled_markets
+from .live_feed import LiveFeedProcessor
 from .observability import metrics
 from .pipeline import CycleResult, preload_from_db, process_cycle
 from .results import backfill_results, reconcile_recent
@@ -93,6 +94,7 @@ class Scheduler:
         queue_maxsize: int = 100,
         recovery_probe_cycles: int = DEFAULT_RECOVERY_PROBE_CYCLES,
         alerter: ThrottledAlerter | None = None,
+        live_feed: LiveFeedProcessor | None = None,
     ):
         self.http = http
         self.cdn_http = cdn_http
@@ -103,6 +105,7 @@ class Scheduler:
         self.poll_interval = poll_interval
         self.recovery_probe_cycles = recovery_probe_cycles
         self.alerter = alerter
+        self.live_feed = live_feed
         self.queue: asyncio.Queue[CycleJob] = asyncio.Queue(maxsize=queue_maxsize)
         self.detectors: dict[int, ChangeDetector] = {league_id: ChangeDetector() for league_id in leagues}
         self.dictionary = MarketDictionary()
@@ -285,6 +288,15 @@ class Scheduler:
                     league_id=job.league_id, collected_at=job.collected_at, latency_ms=job.latency_ms,
                     source=job.source,
                 )
+                if self.live_feed is not None:
+                    # Après process_cycle (jamais avant) : round_results et match_feed référencent
+                    # events, upserté juste au-dessus dans la même transaction connexion.
+                    try:
+                        await self.live_feed.process_games(conn, job.response.games)
+                    except BlockedError as exc:
+                        # Le résultat de ce cycle reste valable (déjà écrit) ; seuls les cycles
+                        # suivants sont concernés par l'arrêt.
+                        await self._stop_if_blocked(exc, context=f"fil de match, ligue {job.league_id}")
             metrics.database_write_seconds.observe(time.monotonic() - t0)
             league_label = str(job.league_id)
             metrics.events_collected_total.labels(league=league_label).inc(result.n_games)

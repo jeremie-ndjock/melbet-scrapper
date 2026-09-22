@@ -998,7 +998,7 @@ et alerting branchés.
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape) — le collecteur tourne en production réelle sur un VPS AWS (eu-west-3, m7i-flex.large)**. Le site répond normalement depuis cette IP réelle (aucun blocage observé). Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. Points ouverts : IP Elastic à allouer, budget AWS à confirmer, réception des alertes depuis le VPS à confirmer. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés depuis la machine locale) ; sauvegardes quotidiennes sur le VPS (vérifiées en conditions réelles) et récupération par l'utilisateur.
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et testées (231 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape) — le collecteur tourne en production réelle sur un VPS AWS (eu-west-3, m7i-flex.large)**. Le site répond normalement depuis cette IP réelle (aucun blocage observé). Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Nouveau (2026-09-22) : fil de match Telegram en direct, une mise à jour par manche (vainqueur, temps, type de finishing), vérifié avec un vrai message sur un vrai match — reste à déployer sur le VPS.** Points ouverts : IP Elastic à allouer, budget AWS à confirmer, réception des alertes depuis le VPS à confirmer, fil de match à déployer sur le VPS. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés depuis la machine locale) ; fil de match Telegram sur un salon dédié (vérifié en conditions réelles) ; sauvegardes quotidiennes sur le VPS (vérifiées en conditions réelles) et récupération par l'utilisateur.
 
 ## 22. Clôture de session — 2026-09-22
 
@@ -1034,3 +1034,69 @@ d'autre n'est en attente de décision de la part de l'utilisateur pour l'instant
 3. Point resté ouvert et jamais retranché de la liste des sujets en suspens (section 13/21) : la
    réception réelle de l'alerte de test envoyée à l'étape 8 n'a jamais été explicitement confirmée
    par l'utilisateur — à reconfirmer si l'occasion se présente, sans bloquer la suite.
+
+## 23. Fil de match Telegram en direct (2026-09-22)
+
+Fonctionnalité demandée par l'utilisateur après la clôture de l'étape 11, hors du plan initial à
+11 étapes : diffuser les matchs en direct sur Telegram, avec mise à jour automatique à chaque
+manche (vainqueur, temps, type de finishing), sur le modèle :
+
+```
+Goro VS Ermac
+Manche 1 : vainqueur Goro, temps: 31 secondes, Type de finishing: Regular
+```
+
+**Découverte clé, avant tout code** : la donnée nécessaire existait déjà dans les notes de
+reconnaissance (section 15, « Tableau des rounds ») mais n'avait **jamais été implémentée** :
+l'endpoint `GET /cyber-api/mainfeedlive/web/cyber/v3/statistic?fcountry=84&gameId={id}&gr=2147&lng=fr&ref=8`
+renvoie `statistic.main.RoundTable`, une **chaîne** JSON (à décoder une seconde fois) donnant, pour
+chaque manche déjà terminée : `R` (numéro), `T` (durée en secondes), `W` (nom du vainqueur, en
+toutes lettres), `DI` (type de finishing : Regular/Fatality/Brutality/...), `WT` et `FW`. Se met à
+jour manche par manche, en direct — contrairement aux résultats officiels (`results.py`), qui
+n'arrivent qu'après la fin complète du match. Vérifié en conditions réelles le 2026-09-22 sur trois
+matchs (en cours, tout juste commencé, terminé) : toujours `200`, jamais le `204` documenté en
+reconnaissance (qui correspond à un match déjà disparu de la liste, donc jamais interrogé par ce
+collecteur).
+
+**Décisions prises avec l'utilisateur** : un salon Telegram dédié (groupe « Ligue Mortal Kombat »,
+distinct du chat d'alertes techniques existant, pour ne jamais mélanger un flux fréquent avec des
+alertes rares et critiques) ; **un seul message par match, édité à chaque manche** (pas un nouveau
+message à chaque fois) ; le score courant affiché à chaque ligne.
+
+**Fichiers créés** :
+
+| Fichier | Rôle |
+|---|---|
+| `migrations/006_match_feed.sql` | Table `match_feed` : un message Telegram par match, son identifiant (pour l'éditer), le nombre de manches déjà publiées, l'état terminé |
+| `src/collector/sources/v3/statistic.py` | Appel et décodage de `v3/statistic` (tolérant : une manche illisible est ignorée, jamais tout le tableau) |
+| `src/collector/telegram_feed.py` | `MatchFeedSender` (envoi/édition Telegram, jamais bloquant), `format_match_message` (reconstruit le texte en entier à chaque fois — idempotent, aucune dérive possible) |
+| `src/collector/live_feed.py` | `LiveFeedProcessor` : détecte une nouvelle manche (score qui augmente), appelle `v3/statistic` seulement à ce moment-là (pas à chaque cycle de 5 s, pour rester dans le débit alloué), publie/édite le message, et **complète au passage `round_results`** (durée, type de finish) — des colonnes prévues dès la migration 002 mais jamais alimentées avant cette fonctionnalité |
+| 34 tests supplémentaires | `test_statistic.py`, `test_telegram_feed.py`, `test_live_feed.py`, et des ajouts à `test_scheduler.py` |
+
+**Un vrai défaut de logique trouvé en relisant le code avant de lancer les tests** : la condition
+initiale pour savoir si un match avait « du nouveau » à publier ne gérait pas correctement le cas
+où le libellé « Jeu terminé » arrive un cycle après que le score a atteint son total final
+(comportement déjà documenté section 4) — le drapeau `match_finished` serait resté bloqué à faux
+indéfiniment dans ce cas. Corrigé avant tout test, avec un test dédié qui simule explicitement ce
+décalage d'un cycle.
+
+**Politique de blocage respectée** : un blocage sur l'endpoint `statistic` se propage et arrête
+tout l'ordonnanceur, exactement comme un blocage sur les cotes — jamais de contournement, même
+pour cette fonctionnalité annexe. Une erreur transitoire ou de schéma, elle, n'affecte que ce match
+pour ce cycle (le suivant réessaiera), sans jamais interrompre la collecte des cotes elle-même.
+
+**Vérification en conditions réelles (2026-09-22)**, au-delà des 34 nouveaux tests (231 au total,
+confirmés sur deux exécutions indépendantes, couverture globale 96 %) : un vrai message a été
+envoyé sur le vrai groupe Telegram à partir des vraies données d'un match réellement en cours
+(Jacqueline Briggs vs Ferra & Torr, 5 manches, score 2-3), avec le format exact demandé ; son
+édition a ensuite été testée réellement avec succès (le message affiché a bien changé sur place,
+confirmé par l'utilisateur).
+
+**Portée volontairement limitée** : le fil de match n'est câblé que sur la source principale (v3)
+et la source de secours (legacy, via l'adaptateur commun) au même titre que les cotes — un
+changement de structure spécifique à l'endroit `statistic` n'entraîne pas de bascule dédiée (juste
+une manche non publiée ce cycle, réessayée au suivant). Fonctionnalité optionnelle et désactivée
+par défaut : sans `TELEGRAM_MATCH_CHAT_ID` dans `.env`, rien ne change au fonctionnement existant.
+
+**Reste à faire** : câbler le déploiement sur le VPS réel (ajouter `TELEGRAM_MATCH_CHAT_ID` à son
+`.env`, redéployer) — en attente à la fin de cette session.

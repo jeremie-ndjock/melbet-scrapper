@@ -230,6 +230,7 @@ Les ligues sont définies dans `config/leagues.yaml` : ajouter une ligue est un 
 | 9. Tests **(terminée)** | Couverture unitaire, intégration, pannes | 198 tests, couverture mesurée 96 % (branches) ; deux exécutions indépendantes stables ; voir Memoire.md, journal d'étape |
 | 10. Docker **(terminée)** | Images, Compose, sauvegardes | Sauvegarde et restauration testées en conditions réelles (TimescaleDB) ; journaux Docker bornés ; README.md ; voir Memoire.md, journal d'étape |
 | 11. VPS **(terminée)** | Runbook (`docs/runbook.md`), déploiement AWS réel (m7i-flex.large, eu-west-3) | Site vérifié accessible normalement depuis la vraie IP du VPS (aucun blocage) ; pile complète healthy/up ; voir Memoire.md, journal d'étape |
+| 12. Fil de match Telegram **(terminée, hors plan initial)** | Une mise à jour par manche (vainqueur, temps, type de finishing), un message édité par match | Vrai message envoyé et édité avec succès sur un vrai match en cours ; 231 tests ; voir Memoire.md, section 23 |
 
 À chaque étape : fichiers créés, code complet, commandes d'installation, tests à exécuter, résultats attendus, problèmes possibles.
 
