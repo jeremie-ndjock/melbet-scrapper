@@ -820,11 +820,75 @@ python scripts/watchdog.py                            # surveillance externe, à
   (pas d'accès pour l'instant, Memoire.md section 13).
 - La réception réelle du message d'alerte de vérification reste à confirmer par l'utilisateur.
 
-**Prochaine étape : 9, tests systématiques et couverture** (revue de la couverture globale,
-scénarios de pannes non encore combinés entre eux, documentation des tests existants) — une bonne
-partie du travail de cette étape a déjà été faite au fil des étapes précédentes (140 à 171 tests
-cumulés), il s'agit surtout de consolider et de combler les manques plutôt que de repartir de zéro.
+### Étape 9 : tests systématiques et couverture (2026-09-22) : terminée
+
+Confirmation de l'estimation faite à l'étape 8 : l'essentiel du travail avait déjà été fait au fil
+des étapes précédentes. Cette étape a donc consisté à **mesurer objectivement** la couverture
+(jusqu'ici jamais chiffrée, seulement estimée au jugé) puis à combler les manques réels qu'elle a
+révélés, plutôt qu'à repartir de zéro.
+
+**Outillage ajouté** : `pytest-cov` (`requirements-dev.txt`), avec une configuration dédiée dans
+`pyproject.toml` (`[tool.coverage.run]` / `[tool.coverage.report]`) :
+- couverture de branches activée (`branch = true`), plus stricte qu'un simple compte de lignes ;
+- `src/collector/prototype.py` explicitement exclu (`omit`), avec la raison documentée dans le
+  fichier lui-même : c'est un script de démonstration manuelle à un seul cycle, jamais utilisé en
+  production (c'est `scheduler.py` qui orchestre réellement la collecte), et le compter aurait
+  faussé le pourcentage global avec du code qui n'a pas vocation à être testé automatiquement.
+
+**Mesure de départ** : 90 % (lignes) sur l'ensemble du code de production, 171 tests. Deux manques
+significatifs identifiés par la mesure elle-même (pas par relecture manuelle) :
+1. **`src/collector/main.py` (point d'entrée de production) : jamais testé**, alors que c'est
+   précisément ce module qui contenait deux des quatre vrais défauts de déploiement trouvés à
+   l'étape 8 (migrations jamais appliquées, dossier de migrations manquant). Corrigé par un nouveau
+   `tests/unit/test_main.py` (5 tests) : ordre migrations-avant-connexion à la base verrouillé,
+   code de sortie (0 normal / 3 si bloqué), fermeture propre de toutes les ressources même si
+   l'ordonnanceur lève une exception, avertissement si aucun canal d'alerte n'est configuré.
+2. **`src/collector/transport/ratelimit.py` (limiteur de débit et coupe-circuit) : seulement
+   couvert indirectement**, via les tests du client HTTP. Corrigé par un nouveau
+   `tests/unit/test_ratelimit.py` (9 tests rapides, sans réseau ni base) : espacement minimal réel
+   entre requêtes (y compris en cas d'appels concurrents), et les trois états du coupe-circuit
+   (fermé, ouvert, semi-ouvert) y compris la reprise complète après le délai de récupération.
+
+**Autres manques comblés une fois la mesure faite** :
+- `src/collector/storage/migrate.py` : l'enveloppe en ligne de commande `main()` (jamais testée)
+  et le cas « dossier de migrations introuvable » (`discover()`) — précisément le message d'erreur
+  qui a servi de seul indice au vrai défaut de déploiement de l'étape 8. Nouveau
+  `tests/unit/test_migrate_cli.py` (4 tests) et un ajout à `tests/integration/test_migrations.py`.
+  Couverture du module : 80 % → 100 %.
+- `src/collector/scheduler.py` (le plus gros module, 244 lignes) : 7 tests supplémentaires dans
+  `tests/integration/test_scheduler.py` couvrant des branches de résilience non encore exercées :
+  blocage pendant le préchargement (`preload_all`), erreur transitoire sur une seule ligue au
+  préchargement (les autres ne sont pas affectées), arrêt déjà demandé avant le début d'un
+  rattrapage ou d'une réconciliation (aucun appel réseau inutile), reprise d'une tâche périodique
+  après une exception transitoire, `write_once` sur une file vide, et une ligue déjà en mode
+  dégradé dont la source de secours échoue à son tour (cycle perdu proprement, pas de blocage).
+  Couverture du module : 86 % → 91 % (lignes), 91 % (branches).
+
+**Résultat final, confirmé sur deux exécutions complètes indépendantes** : **198 tests, couverture
+globale 96 % (couverture de branches)**, contre 90 % (lignes seules) en début d'étape. Le détail
+par fichier est dans la sortie de `pytest --cov` (conservée en commentaire dans les scripts de
+vérification) ; en résumé, les modules à 100 % couvrent l'essentiel de la logique métier
+(`config`, `dedupe`, `normalize`, `pipeline`, `main`, `migrate`, la source legacy, `ratelimit`), et
+les quelques pourcents restants ailleurs sont des branches à faible risque déjà identifiées comme
+telles (garde `if __name__ == "__main__"`, cas rares de validation Pydantic, chemins d'erreur du
+client CDN peu critiques) plutôt que des trous cachés.
+
+**Ce que cette étape ne visait pas** : ajouter de nouveaux scénarios métier (déjà couverts en
+profondeur depuis les étapes 3 à 8) ou viser 100 % partout — au-delà d'un certain point, forcer la
+couverture de branches de garde très improbables aurait ajouté des tests fragiles sans valeur de
+détection réelle, ce qui aurait été contraire à la discipline de ce projet (chaque test doit
+correspondre à un vrai scénario de panne ou de comportement attendu, pas à une ligne à cocher).
+
+**Commande** :
+
+```text
+docker compose run --rm tests pytest --cov=collector --cov-report=term-missing -q
+```
+
+**Prochaine étape : 10, endurcissement du déploiement** (rôle non-root pour PostgreSQL déjà en
+place côté application, image d'exécution encore allégeable, `README.md` pour un tiers qui
+reprendrait le projet, complétude de `.env.example`).
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 8 terminées et testées (171 tests, plus des vérifications réelles à chaque étape, y compris un déploiement complet avec Prometheus et Grafana)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, et applique ses propres migrations au démarrage. Prochaine étape : 9 (consolidation des tests). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 9 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape, y compris un déploiement complet avec Prometheus et Grafana)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, et applique ses propres migrations au démarrage. Prochaine étape : 10 (endurcissement du déploiement). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).

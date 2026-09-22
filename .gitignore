@@ -8,3 +8,8 @@
 __pycache__/
 *.pyc
 *.bak
+
+# Données de couverture (générées localement par `pytest --cov`, jamais versionnées)
+.coverage
+.coverage.*
+htmlcov/

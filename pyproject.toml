@@ -3,3 +3,18 @@ pythonpath = ["src", "scripts"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 addopts = "-ra"
+
+[tool.coverage.run]
+branch = true
+omit = [
+    # Script de démonstration manuelle à un seul cycle (voir sa docstring) : jamais utilisé en
+    # production (c'est `scheduler.py` qui orchestre réellement la collecte), donc jamais couvert
+    # par les tests automatisés. L'exclure ici évite de fausser le pourcentage global avec du code
+    # qui n'a pas vocation à l'être.
+    "src/collector/prototype.py",
+]
+
+[tool.coverage.report]
+exclude_also = [
+    "if __name__ == .__main__.:",
+]

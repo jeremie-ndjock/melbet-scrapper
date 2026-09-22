@@ -412,6 +412,111 @@ async def test_legacy_fallback_cycle_is_recorded_with_legacy_source_not_v3(db_po
     assert odds_source == 2 and log_source == 2  # 2 = secours, jamais 1 (source principale)
 
 
+# ---------------------------------------------------------------- étape 9 : comblement des manques
+
+async def test_write_once_returns_none_when_the_queue_is_empty(db_pool):
+    sched = make_scheduler(db_pool, FakeMelbet(), FakeCdn(), leagues={MK_X: "x"})
+    result = await sched.write_once(timeout=0.05)
+    assert result is None
+
+
+async def test_preload_all_stops_immediately_on_a_blocked_response(db_pool):
+    melbet = FakeMelbet()
+    melbet.blocked = True
+    sched = make_scheduler(db_pool, melbet, FakeCdn())  # les deux ligues
+
+    await sched.preload_all()
+
+    assert sched.stopping is True
+    assert sched.metrics.blocked is True
+
+
+async def test_preload_all_skips_a_league_with_a_transient_error_and_continues(db_pool, caplog):
+    """Une erreur transitoire (5xx) au préchargement d'une ligue ne doit pas empêcher le
+    préchargement des autres : cette ligue traitera simplement son prochain cycle comme un tout
+    premier lancement (voir la docstring de `preload_all`)."""
+    melbet = FakeMelbet()
+
+    def one_league_down(request: httpx.Request) -> httpx.Response:
+        q = parse_qs(request.url.query.decode())
+        if "gamesByChamp" in request.url.path and q.get("champId", [""])[0] == str(MK_X):
+            return httpx.Response(500)
+        return melbet.handler(request)
+
+    sched = make_scheduler(db_pool, melbet, FakeCdn())
+    sched.http = make_http(one_league_down, retry=RetryConfig(max_attempts=1, base_delay_seconds=0.01, max_delay_seconds=0.01))
+
+    with caplog.at_level("WARNING"):
+        await sched.preload_all()  # ne lève rien
+
+    assert sched.metrics.blocked is False
+    assert any("préchargement impossible" in r.message for r in caplog.records)
+    # La ligue saine, elle, a bien été préchargée sans encombre (aucune exception propagée jusqu'ici).
+
+
+async def test_backfill_stops_immediately_if_already_stopping(db_pool):
+    melbet = FakeMelbet()
+    sched = make_scheduler(db_pool, melbet, FakeCdn())  # les deux ligues
+    sched.stop()  # simule un arrêt demandé (SIGTERM) juste avant le rattrapage
+
+    total = await sched.backfill_once(days_back=1)
+
+    assert total == 0
+    assert melbet.games_calls == []  # aucune ligue n'a été interrogée
+
+
+async def test_reconcile_stops_immediately_if_already_stopping(db_pool):
+    melbet = FakeMelbet()
+    sched = make_scheduler(db_pool, melbet, FakeCdn())
+    sched.stop()
+
+    total = await sched.reconcile_results_once()
+
+    assert total == 0
+
+
+async def test_periodic_task_survives_a_transient_exception_and_retries(db_pool):
+    """Une tâche périodique (rafraîchissement du dictionnaire, réconciliation…) qui échoue une fois
+    ne doit pas rester bloquée : `_periodic` journalise et retente au prochain intervalle."""
+    sched = make_scheduler(db_pool, FakeMelbet(), FakeCdn(), leagues={MK_X: "x"})
+    calls: list[int] = []
+
+    async def action():
+        calls.append(len(calls) + 1)
+        if len(calls) == 1:
+            raise RuntimeError("panne transitoire simulée")
+        sched.stop()
+
+    await asyncio.wait_for(sched._periodic(action, interval_seconds=0.01, name="test"), timeout=2.0)
+
+    assert calls == [1, 2]  # a survécu à l'échec du premier appel et a bien retenté
+
+
+async def test_degraded_league_reports_failure_without_stopping_when_not_yet_probing_and_legacy_fails(db_pool):
+    """Une fois dégradée, une ligue interroge directement la source de secours (sans retenter le v3
+    avant le cycle de sondage prévu). Si cette source de secours échoue à son tour à ce moment-là,
+    le cycle est perdu proprement, sans arrêter l'ordonnanceur."""
+    melbet = FakeMelbet()
+    melbet.v3_schema_broken = True
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, recovery_probe_cycles=100)
+
+    assert await sched.poll_once(MK_X) is True  # cycle 1 : bascule (ParserError), écrit via la source de secours
+    await sched.write_once()
+    assert MK_X in sched._degraded
+
+    def broken_secondary(request: httpx.Request) -> httpx.Response:
+        if "GetChampZip" in request.url.path or "GetGameZip" in request.url.path:
+            return httpx.Response(500)
+        return melbet.handler(request)
+    sched.http = make_http(broken_secondary, retry=RetryConfig(max_attempts=1, base_delay_seconds=0.01, max_delay_seconds=0.01))
+
+    result = await sched.poll_once(MK_X)  # cycle 2 : toujours dégradée, pas encore de nouvel essai du v3
+
+    assert result is True          # pas un blocage : le cycle suivant pourra réessayer
+    assert sched.stopping is False
+    assert sched.metrics.errors >= 1
+
+
 async def test_failed_cycle_is_recorded_in_collection_log_as_not_ok(db_pool):
     melbet = FakeMelbet()
     melbet.v3_schema_broken = True  # source principale cassée...

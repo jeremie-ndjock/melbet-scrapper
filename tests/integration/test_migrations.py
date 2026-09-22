@@ -82,3 +82,13 @@ async def test_invalid_file_name_is_rejected(dsn, tmp_path: Path):
     (tmp_path / "schema.sql").write_text("SELECT 1;", encoding="utf-8")
     with pytest.raises(MigrationError, match="nom de migration invalide"):
         await migrate(dsn, tmp_path)
+
+
+async def test_missing_migrations_directory_is_reported_clearly(dsn, tmp_path: Path):
+    """Régression du vrai défaut de déploiement trouvé à l'étape 8 : l'image de production ne
+    copiait pas `migrations/`, et le message d'erreur d'origine était le seul indice disponible
+    dans les journaux du conteneur. On verrouille ici qu'il reste clair et distinct des autres
+    erreurs de migration (pas une simple exception non gérée)."""
+    absent = tmp_path / "n_existe_pas"
+    with pytest.raises(MigrationError, match="dossier de migrations introuvable"):
+        await migrate(dsn, absent)
