@@ -937,15 +937,68 @@ limite de journaux (`max-size: 10m, max-file: 10`) est bien appliquée au conten
 **Résultat** : 198 tests toujours au vert (aucune régression, ces changements ne touchent pas le
 code applicatif testé), plus la vérification réelle de sauvegarde/restauration ci-dessus.
 
-**Prochaine étape : 11, déploiement VPS réel**, en attente de l'accès au VPS annoncé par
-l'utilisateur (voir section 13) : runbook de mise en service, et surtout le test qui ne peut se
-faire qu'à ce moment-là — le comportement du site depuis la véritable adresse IP du VPS (aucune
-raison de penser qu'il diffère, aucune protection anti-bot observée jusqu'ici, mais seule une
-vérification réelle en aura la certitude).
+### Étape 11 : déploiement VPS réel (2026-09-22) : terminée
+
+L'utilisateur a obtenu un accès AWS (compte gratuit, 100 $ de crédit) et créé le VPS le jour même.
+Choix retenus (voir `docs/runbook.md`, nouvellement créé) : instance **m7i-flex.large** (2 vCPU,
+8 Go — équivalent exact de la cible `t3.large` de l'architecture, `t3.large` n'étant pas proposée
+par l'assistant de lancement simplifié sur ce compte), région **eu-west-3 (Paris)**, **Ubuntu
+Server 24.04 LTS** (x86, non-Pro), 50 Go gp3, groupe de sécurité restreint au SSH depuis l'IP de
+l'utilisateur (aucun autre port ouvert), IP publique automatique (Elastic IP non allouée par
+l'utilisateur pour l'instant — à faire avant un fonctionnement prolongé, voir « points restés
+ouverts » plus bas).
+
+**Le test qui ne pouvait se faire qu'à ce moment précis, réalisé avec succès** : depuis la
+véritable adresse IP du VPS (AWS, région Paris), le site `melbet-cm.com` répond normalement
+(`HTTP/1.1 200 OK` sur tous les appels v3, aucun 403/429). Confirme ce que la reconnaissance
+initiale laissait supposer sans certitude absolue (Memoire.md, section 4) : aucune protection
+anti-bot basée sur la géographie ou la réputation d'IP n'affecte ce déploiement.
+
+**Déploiement effectué** : Docker et le pare-feu applicatif (`ufw`, SSH uniquement) installés sur
+le serveur, dépôt cloné dans `/opt/oddscollector`, pile complète (`db`, `scraper`, `prometheus`,
+`grafana`) démarrée. Résultat, vérifié en conditions réelles : les 4 services `healthy`/`up`, les
+5 migrations appliquées automatiquement au tout premier démarrage, Prometheus voit la cible
+`up`, Grafana répond `healthy`. Tâches planifiées installées (`crontab`) : sauvegarde quotidienne
+à 3h et surveillance externe toutes les 5 min, toutes deux vérifiées manuellement avec succès.
+
+**Un vrai défaut trouvé en déployant réellement** (et non en écrivant seulement le runbook) : le
+`.env` local a été copié vers le VPS par commodité (`scp`) plutôt que ressaisi à la main — or ce
+fichier, édité sous Windows, a des fins de ligne CRLF. `scripts/backup_db.sh` et
+`scripts/restore_db.sh` font tous les deux un `source .env` classique en bash, qui laisse un `\r`
+invisible collé à la fin de chaque valeur une fois sourcé sous Linux (`POSTGRES_USER` devenant de
+fait `"collector\r"`, rejeté par PostgreSQL comme un rôle inexistant — repéré en investiguant un
+faux signal du watchdog). **Le conteneur `scraper` lui-même n'était pas affecté** : l'analyseur
+`env_file` de Docker Compose normalise déjà correctement les fins de ligne, vérifié explicitement
+en interrogeant les variables d'environnement du conteneur sans jamais afficher leur valeur.
+Corrigé dans les deux scripts (`tr -d '\r'` avant de sourcer) et documenté dans le runbook comme
+piège à éviter après un `scp` depuis Windows. Un `.gitattributes` a aussi été ajouté pour garantir
+que les scripts `.sh` restent en LF dans le dépôt (déjà le cas, vérifié, mais désormais garanti
+explicitement plutôt que dépendant de la configuration git locale de chaque contributeur).
+
+**Un faux signal, pas un défaut** : un premier essai manuel du watchdog, environ deux minutes
+après le tout premier démarrage, a signalé un retard — en réalité le tout premier cycle réussi
+n'avait pas encore eu le temps d'être journalisé pour les deux ligues. Confirmé en interrogeant
+`collection_log` directement (27 cycles réussis par ligue quelques minutes plus tard) puis en
+relançant le watchdog, qui est passé au vert.
+
+**Points restés ouverts, à traiter avant un fonctionnement prolongé sans surveillance** :
+- **IP Elastic non allouée** : l'IP publique actuelle changerait si l'instance était redémarrée.
+  À faire dès que possible (voir `docs/runbook.md` §3).
+- **Budget AWS** : l'alerte de suivi de coût (`docs/runbook.md` §8) n'a pas encore été confirmée
+  comme configurée par l'utilisateur.
+- **Réception réelle des alertes** (Telegram/e-mail) depuis ce nouveau déploiement : pas encore
+  testée explicitement depuis le VPS (l'a été depuis la machine locale à l'étape 8) — la
+  configuration est identique (même `.env`), risque jugé faible, mais à confirmer.
+- Les récupérations régulières de sauvegardes vers une machine hors VPS (recommandé hebdomadaire)
+  n'ont pas encore commencé.
+
+**Résultat** : les 11 étapes du plan de développement initial sont désormais toutes terminées.
+Le collecteur tourne en production réelle, sur le vrai VPS, contre le vrai site, avec observabilité
+et alerting branchés.
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 10 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape, y compris sauvegarde/restauration réelle de la base TimescaleDB)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, et dispose de scripts de sauvegarde/restauration vérifiés. Prochaine étape : 11 (déploiement VPS réel), en attente de l'accès VPS de l'utilisateur. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS (script vérifié) et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape) — le collecteur tourne en production réelle sur un VPS AWS (eu-west-3, m7i-flex.large)**. Le site répond normalement depuis cette IP réelle (aucun blocage observé). Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. Points ouverts : IP Elastic à allouer, budget AWS à confirmer, réception des alertes depuis le VPS à confirmer. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés depuis la machine locale) ; sauvegardes quotidiennes sur le VPS (vérifiées en conditions réelles) et récupération par l'utilisateur.
 
 ## 22. Clôture de session — 2026-09-22
 
