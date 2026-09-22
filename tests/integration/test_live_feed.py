@@ -19,6 +19,8 @@ from collector.transport.http import HttpClient, RetryConfig
 from collector.transport.ratelimit import RateLimiter
 
 GAME_ID = 755197701
+LEAGUE_ID = 1252965
+LEAGUE_NAME = "Mortal Kombat X"
 
 
 def _game(score1: int, score2: int, period_name: str = "3ème round") -> Game:
@@ -87,7 +89,7 @@ async def test_first_completed_round_sends_a_new_message_and_fills_round_results
 
     game = _game(1, 0)
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
     assert len(sender.sent) == 1
     assert "Manche 1 : vainqueur Goro, temps: 31 secondes, Type de finishing: Regular" in sender.sent[0]
@@ -105,12 +107,12 @@ async def test_second_completed_round_edits_the_existing_message(db):
 
     game = _game(1, 0)
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
     first_message_id = await db.fetchval("SELECT message_id FROM match_feed WHERE game_id = $1", GAME_ID)
 
     stat.rounds.append({"R": 2, "T": 45, "W": "Ermac", "DI": "Fatality", "WT": "0", "FW": True})
     game2 = _game(1, 1)
-    await proc.process_games(db, [game2])
+    await proc.process_games(db, [game2], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
     assert len(sender.sent) == 1  # jamais un deuxième message
     assert len(sender.edited) == 1
@@ -128,10 +130,10 @@ async def test_no_new_round_does_not_call_statistic_again(db):
 
     game = _game(1, 0)
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
     calls_after_first = stat.calls
 
-    await proc.process_games(db, [game])  # même score : rien de nouveau
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)  # même score : rien de nouveau
 
     assert stat.calls == calls_after_first
     assert len(sender.sent) == 1 and len(sender.edited) == 0
@@ -144,7 +146,7 @@ async def test_match_not_yet_started_is_skipped_without_calling_statistic(db):
 
     game = _game(0, 0, period_name="1er round")
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
     assert stat.calls == 0
     assert sender.sent == []
@@ -161,11 +163,11 @@ async def test_statistic_lagging_behind_the_score_is_retried_next_cycle(db):
 
     game = _game(1, 0)
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
     assert sender.sent == []  # rien envoyé : pas d'information erronée
 
     stat.rounds = [{"R": 1, "T": 31, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False}]
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
     assert len(sender.sent) == 1  # rattrapé au cycle suivant
 
 
@@ -177,7 +179,7 @@ async def test_match_finished_is_recorded_and_announces_the_winner(db):
 
     game = _game(5, 0, period_name="Jeu terminé")
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
     assert "🏆 Vainqueur du match : Goro (5-0)" in sender.sent[0]
     finished = await db.fetchval("SELECT match_finished FROM match_feed WHERE game_id = $1", GAME_ID)
@@ -195,13 +197,13 @@ async def test_finished_label_arriving_a_cycle_later_still_updates_match_finishe
 
     game = _game(5, 0, period_name="5ème round")  # score final déjà atteint, libellé pas encore mis à jour
     await _seed_event(db, game)
-    await proc.process_games(db, [game])
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
     assert len(sender.sent) == 1
     finished = await db.fetchval("SELECT match_finished FROM match_feed WHERE game_id = $1", GAME_ID)
     assert finished is False
 
     game_finished = _game(5, 0, period_name="Jeu terminé")  # même score, libellé mis à jour
-    await proc.process_games(db, [game_finished])
+    await proc.process_games(db, [game_finished], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
     assert len(sender.sent) == 1  # pas de nouveau message
     assert len(sender.edited) == 1  # le message existant est réédité (même texte, drapeau à jour)
@@ -218,7 +220,7 @@ async def test_a_blocked_statistic_endpoint_propagates_blocked_error(db):
     game = _game(1, 0)
     await _seed_event(db, game)
     with pytest.raises(BlockedError):
-        await proc.process_games(db, [game])
+        await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
 
 
 async def test_a_transient_statistic_error_is_tolerated_for_this_game_only(db, caplog):
@@ -230,6 +232,6 @@ async def test_a_transient_statistic_error_is_tolerated_for_this_game_only(db, c
     game = _game(1, 0)
     await _seed_event(db, game)
     with caplog.at_level("WARNING"):
-        await proc.process_games(db, [game])  # ne lève rien
+        await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)  # ne lève rien
 
     assert sender.sent == []

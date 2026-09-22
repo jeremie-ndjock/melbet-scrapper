@@ -113,11 +113,14 @@ VALUES ($1, $2, $3, $4, $5, $6)
 
 # Fil Telegram en direct par match (voir live_feed.py). Un seul enregistrement par match, créé la
 # première fois qu'une manche est publiée.
-SELECT_MATCH_FEED = "SELECT message_id, last_round_notified, match_finished FROM match_feed WHERE game_id = $1"
+SELECT_MATCH_FEED = """
+SELECT message_id, last_round_notified, match_finished, match_no_of_day
+FROM match_feed WHERE game_id = $1
+"""
 
 INSERT_MATCH_FEED = """
-INSERT INTO match_feed (game_id, chat_id)
-VALUES ($1, $2)
+INSERT INTO match_feed (game_id, chat_id, match_no_of_day)
+VALUES ($1, $2, $3)
 ON CONFLICT (game_id) DO NOTHING
 """
 
@@ -125,4 +128,12 @@ UPDATE_MATCH_FEED = """
 UPDATE match_feed
 SET message_id = $2, last_round_notified = $3, match_finished = $4, updated_at = now()
 WHERE game_id = $1
+"""
+
+# Rang du match parmi ceux de la même ligue commençant le même jour (UTC), par heure de début
+# croissante — voir migrations/007_match_feed_match_number.sql pour le choix de ce calcul plutôt
+# que le champ `num` du site (un identifiant interne, pas un compteur journalier).
+COUNT_LEAGUE_MATCHES_UP_TO = """
+SELECT count(*) FROM events
+WHERE league_id = $1 AND start_ts >= $2 AND start_ts <= $3
 """

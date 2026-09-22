@@ -35,29 +35,47 @@ def test_load_match_feed_config_from_env_reads_expected_variables(monkeypatch):
 
 def test_format_message_matches_the_requested_example():
     rounds = [_round(1, "Goro", seconds=31, finish="Regular")]
-    text = format_match_message("Goro", "Ermac", rounds)
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X")
     assert "Goro VS Ermac" in text
     assert "Manche 1 : vainqueur Goro, temps: 31 secondes, Type de finishing: Regular" in text
 
 
+def test_format_message_includes_the_league_name():
+    rounds = [_round(1, "Goro")]
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat 3")
+    assert "Mortal Kombat 3" in text.splitlines()[0]
+
+
+def test_format_message_includes_the_match_number_of_the_day_when_given():
+    rounds = [_round(1, "Goro")]
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X", match_no_of_day=37)
+    assert "Match n°37 de la journée" in text.splitlines()[0]
+
+
+def test_format_message_omits_the_match_number_when_not_given():
+    rounds = [_round(1, "Goro")]
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X")
+    assert "Match n°" not in text
+
+
 def test_format_message_includes_running_score_per_round():
     rounds = [_round(1, "Goro"), _round(2, "Ermac"), _round(3, "Goro")]
-    text = format_match_message("Goro", "Ermac", rounds)
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X")
     lines = text.splitlines()
-    assert "score 1-0" in lines[2]
-    assert "score 1-1" in lines[3]
-    assert "score 2-1" in lines[4]
+    assert "score 1-0" in lines[3]
+    assert "score 1-1" in lines[4]
+    assert "score 2-1" in lines[5]
 
 
 def test_format_message_announces_the_match_winner_at_five_rounds():
     rounds = [_round(i, "Goro") for i in range(1, 6)]  # 5-0
-    text = format_match_message("Goro", "Ermac", rounds)
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X")
     assert "🏆 Vainqueur du match : Goro (5-0)" in text
 
 
 def test_format_message_does_not_announce_a_winner_before_five_rounds():
     rounds = [_round(1, "Goro"), _round(2, "Goro")]
-    text = format_match_message("Goro", "Ermac", rounds)
+    text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X")
     assert "Vainqueur du match" not in text
 
 
@@ -66,7 +84,7 @@ def test_format_message_tolerates_an_unknown_winner_name(caplog):
     légèrement différent) ne doit jamais faire planter le formatage — seulement être journalisé."""
     rounds = [_round(1, "Quelqu'un d'autre")]
     with caplog.at_level("WARNING"):
-        text = format_match_message("Goro", "Ermac", rounds)
+        text = format_match_message("Goro", "Ermac", rounds, league_name="Mortal Kombat X")
     assert "score 0-0" in text
     assert any("ne correspond à aucun des deux adversaires" in r.message for r in caplog.records)
 

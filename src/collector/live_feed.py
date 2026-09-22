@@ -21,6 +21,7 @@ avant garantirait une violation de contrainte sur le tout premier relevé d'un m
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 import asyncpg
 
@@ -49,20 +50,26 @@ class LiveFeedProcessor:
         self.sender = sender
         self.chat_id = chat_id
 
-    async def process_games(self, conn: asyncpg.Connection, games: list[Game]) -> None:
+    async def process_games(self, conn: asyncpg.Connection, games: list[Game], *,
+                             league_id: int, league_name: str) -> None:
         """Traite chaque match du relevé. Une ``BlockedError`` se propage (même politique que
         partout ailleurs : un blocage arrête tout, jamais de contournement) ; toute autre erreur
         est journalisée et n'affecte que ce match, pour ce cycle — le suivant réessaiera."""
         for game in games:
             try:
-                await self._process_one(conn, game)
+                await self._process_one(conn, game, league_id=league_id, league_name=league_name)
             except BlockedError:
                 raise
             except (ServerError, ParserError) as exc:
                 log.warning("fil de match ignoré ce cycle pour le match %s (%s) : %s",
                             game.id, type(exc).__name__, exc)
 
-    async def _process_one(self, conn: asyncpg.Connection, game: Game) -> None:
+    async def _match_no_of_day(self, conn: asyncpg.Connection, league_id: int, game: Game) -> int:
+        start = datetime.fromtimestamp(game.startTs, tz=timezone.utc)
+        day_start = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        return await conn.fetchval(queries.COUNT_LEAGUE_MATCHES_UP_TO, league_id, day_start, start)
+
+    async def _process_one(self, conn: asyncpg.Connection, game: Game, *, league_id: int, league_name: str) -> None:
         rounds_played = game.scores.fullScoreDetail.scoreOpp1 + game.scores.fullScoreDetail.scoreOpp2
         if rounds_played == 0:
             return  # match pas encore commencé (ou pas encore de manche terminée) : rien à publier
@@ -86,10 +93,15 @@ class LiveFeedProcessor:
 
         await self._complete_round_results(conn, game, rounds)
 
-        text = format_match_message(game.opponent1.display_name, game.opponent2.display_name, rounds)
-        message_id = existing["message_id"] if existing else None
         if existing is None:
-            await conn.execute(queries.INSERT_MATCH_FEED, game.id, self.chat_id)
+            match_no = await self._match_no_of_day(conn, league_id, game)
+            await conn.execute(queries.INSERT_MATCH_FEED, game.id, self.chat_id, match_no)
+        else:
+            match_no = existing["match_no_of_day"]  # figé au premier calcul, jamais recalculé
+
+        text = format_match_message(game.opponent1.display_name, game.opponent2.display_name, rounds,
+                                     league_name=league_name, match_no_of_day=match_no)
+        message_id = existing["message_id"] if existing else None
         new_message_id = await self.sender.send_or_edit(message_id, text)
         if new_message_id is None:
             return  # échec d'envoi (déjà journalisé par MatchFeedSender) : on réessaiera au prochain cycle

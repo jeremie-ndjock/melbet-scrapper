@@ -998,7 +998,7 @@ et alerting branchés.
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et testées (231 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape) — le collecteur tourne en production réelle sur un VPS AWS (eu-west-3, m7i-flex.large)**. Le site répond normalement depuis cette IP réelle (aucun blocage observé). Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Nouveau (2026-09-22) : fil de match Telegram en direct, une mise à jour par manche (vainqueur, temps, type de finishing), vérifié avec un vrai message sur un vrai match — reste à déployer sur le VPS.** Points ouverts : IP Elastic à allouer, budget AWS à confirmer, réception des alertes depuis le VPS à confirmer, fil de match à déployer sur le VPS. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés depuis la machine locale) ; fil de match Telegram sur un salon dédié (vérifié en conditions réelles) ; sauvegardes quotidiennes sur le VPS (vérifiées en conditions réelles) et récupération par l'utilisateur.
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et testées (234 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape) — le collecteur tourne en production réelle sur un VPS AWS (eu-west-3, m7i-flex.large)**. Le site répond normalement depuis cette IP réelle (aucun blocage observé). Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Nouveau (2026-09-22) : fil de match Telegram en direct, une mise à jour par manche (ligue, numéro du match du jour, vainqueur, temps, type de finishing), déployé et vérifié en production sur le VPS (4 matchs suivis en direct).** Points ouverts : IP Elastic à allouer, budget AWS à confirmer, réception des alertes depuis le VPS à confirmer. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés depuis la machine locale) ; fil de match Telegram sur un salon dédié (déployé et vérifié en production) ; sauvegardes quotidiennes sur le VPS (vérifiées en conditions réelles) et récupération par l'utilisateur.
 
 ## 22. Clôture de session — 2026-09-22
 
@@ -1098,5 +1098,39 @@ changement de structure spécifique à l'endroit `statistic` n'entraîne pas de 
 une manche non publiée ce cycle, réessayée au suivant). Fonctionnalité optionnelle et désactivée
 par défaut : sans `TELEGRAM_MATCH_CHAT_ID` dans `.env`, rien ne change au fonctionnement existant.
 
-**Reste à faire** : câbler le déploiement sur le VPS réel (ajouter `TELEGRAM_MATCH_CHAT_ID` à son
-`.env`, redéployer) — en attente à la fin de cette session.
+**Déployé et vérifié en production sur le VPS le jour même** : `TELEGRAM_MATCH_CHAT_ID` ajouté au
+`.env` du VPS, code redéployé, confirmé par les journaux réels du conteneur (appels `v3/statistic`
+puis envois Telegram réussis) et par l'utilisateur, qui a vu les mises à jour arriver dans le
+groupe. 4 matchs suivis simultanément dès le premier cycle après déploiement.
+
+### Complément demandé le même jour : distinguer la ligue et le numéro du match
+
+L'utilisateur a ensuite demandé que chaque message indique la ligue (Mortal Kombat X ou Mortal
+Kombat 3) et le numéro du match dans la journée.
+
+**Un vrai piège évité avant de coder** : le champ `num` déjà présent dans les réponses du site
+(ex. `220241`) ressemble à un numéro de match mais n'en est pas un — vérifié en conditions réelles
+sur les 7 matchs en direct au moment du test : valeurs sans aucune corrélation avec l'ordre ou
+l'heure de début. C'est un identifiant interne du bookmaker, pas un compteur journalier. Le numéro
+affiché est donc **calculé par le collecteur lui-même** : le rang du match parmi tous ceux de la
+même ligue commençant le même jour (UTC), par heure de début croissante (requête sur la table
+`events`, déjà alimentée pour tous les matchs vus). Figé au premier calcul (nouvelle colonne
+`match_feed.match_no_of_day`, migration 007) pour ne jamais changer une fois publié.
+
+Format retenu :
+```
+🎮 Mortal Kombat X — Match n°12 de la journée
+🥊 Leatherface VS Jason Voorhees
+
+Manche 1 : vainqueur Leatherface, temps: 39 secondes, Type de finishing: Fatality (score 1-0)
+...
+```
+
+**Fichiers modifiés** : `migrations/007_match_feed_match_number.sql` (nouvelle colonne, la
+migration 006 étant déjà appliquée en production, jamais modifiée après coup) ;
+`telegram_feed.format_match_message` (en-tête ligue + numéro) ; `live_feed.py` (calcul du rang,
+transmission de la ligue) ; `scheduler.py` (transmet `league_id`/`league_name`, déjà connus de
+l'ordonnanceur). 234 tests au total (+3), couverture 96 % maintenue.
+
+**Vérifié en conditions réelles** : un vrai message envoyé pour chacune des deux ligues, à partir
+de vrais matchs en cours, avec le format ci-dessus. Déployé sur le VPS le jour même.

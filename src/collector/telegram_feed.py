@@ -83,11 +83,15 @@ class MatchFeedSender:
         return await self.send(text)
 
 
-def format_match_message(opp1_name: str, opp2_name: str, rounds, *, finish_threshold: int = 5) -> str:
+def format_match_message(opp1_name: str, opp2_name: str, rounds, *, league_name: str,
+                          match_no_of_day: int | None = None, finish_threshold: int = 5) -> str:
     """Construit le texte complet à partir de toutes les manches connues (reconstruit à chaque
     fois plutôt qu'ajouté incrémentalement : idempotent, se corrige tout seul si un cycle a été
     manqué, jamais de dérive possible entre le message affiché et l'état réel du match)."""
-    lines = [f"🥊 {opp1_name} VS {opp2_name}", ""]
+    en_tete = f"🎮 {league_name}"
+    if match_no_of_day is not None:
+        en_tete += f" — Match n°{match_no_of_day} de la journée"
+    lines = [en_tete, f"🥊 {opp1_name} VS {opp2_name}", ""]
     tally1 = tally2 = 0
     for r in rounds:
         if r.winner_name == opp1_name:

@@ -292,7 +292,10 @@ class Scheduler:
                     # Après process_cycle (jamais avant) : round_results et match_feed référencent
                     # events, upserté juste au-dessus dans la même transaction connexion.
                     try:
-                        await self.live_feed.process_games(conn, job.response.games)
+                        await self.live_feed.process_games(
+                            conn, job.response.games,
+                            league_id=job.league_id, league_name=self.leagues[job.league_id],
+                        )
                     except BlockedError as exc:
                         # Le résultat de ce cycle reste valable (déjà écrit) ; seuls les cycles
                         # suivants sont concernés par l'arrêt.
