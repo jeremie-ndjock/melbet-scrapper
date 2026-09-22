@@ -229,7 +229,7 @@ Les ligues sont définies dans `config/leagues.yaml` : ajouter une ligue est un 
 | 8. Observabilité **(terminée)** | Métriques, tableaux de bord, alertes, watchdog | Prometheus/Grafana vérifiés en conditions réelles ; alerte réelle envoyée sur les deux canaux (réception à confirmer) ; voir Memoire.md, journal d'étape |
 | 9. Tests **(terminée)** | Couverture unitaire, intégration, pannes | 198 tests, couverture mesurée 96 % (branches) ; deux exécutions indépendantes stables ; voir Memoire.md, journal d'étape |
 | 10. Docker **(terminée)** | Images, Compose, sauvegardes | Sauvegarde et restauration testées en conditions réelles (TimescaleDB) ; journaux Docker bornés ; README.md ; voir Memoire.md, journal d'étape |
-| 11. VPS | Runbook, déploiement, **test géographique depuis l'IP néerlandaise** | Collecte stable 24 h |
+| 11. VPS **(terminée)** | Runbook (`docs/runbook.md`), déploiement AWS réel (m7i-flex.large, eu-west-3) | Site vérifié accessible normalement depuis la vraie IP du VPS (aucun blocage) ; pile complète healthy/up ; voir Memoire.md, journal d'étape |
 
 À chaque étape : fichiers créés, code complet, commandes d'installation, tests à exécuter, résultats attendus, problèmes possibles.
 
