@@ -94,6 +94,16 @@ ON CONFLICT (worker, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now
 """
 SELECT_CHECKPOINT = "SELECT value FROM checkpoints WHERE worker = $1 AND key = $2"
 
+# Journal de collecte : un cycle réussi ou échoué. Indispensable avec l'option A (voir Memoire.md,
+# section 16) : sans lui, on ne peut pas distinguer « la cote n'a pas changé » de « le collecteur
+# était aveugle » pour reconstruire une grille régulière. `ON CONFLICT DO NOTHING` par sécurité
+# (collision improbable de l'horodatage à la microseconde), jamais attendu en pratique.
+INSERT_COLLECTION_LOG = """
+INSERT INTO collection_log (ts, league_id, source, endpoint, ok, http_status, latency_ms, n_games, n_rows_written, error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (ts, league_id, source, endpoint) DO NOTHING
+"""
+
 # Réponse en échec de validation de schéma (voir transport/errors.py ParserError et scheduler.py).
 # Le payload est tronqué à l'écriture (voir scheduler.py) : payload_bytes garde la taille d'origine.
 INSERT_DEAD_LETTER = """

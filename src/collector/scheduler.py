@@ -35,14 +35,17 @@ from datetime import datetime, timezone
 
 import asyncpg
 
+from .alerting import ThrottledAlerter
 from .dedupe import ChangeDetector
 from .dictionary import MarketDictionary, refresh_unlabeled_markets
+from .observability import metrics
 from .pipeline import CycleResult, preload_from_db, process_cycle
 from .results import backfill_results, reconcile_recent
 from .sources.legacy.client import fetch_games_by_champ_legacy
 from .sources.v3.client import fetch_games_by_champ
 from .sources.v3.models import GamesByChampResponse
 from .storage import queries
+from .storage.writer import SOURCE_LEGACY, SOURCE_V3
 from .transport.errors import BlockedError, ParserError, ServerError
 from .transport.http import HttpClient
 
@@ -60,6 +63,7 @@ class CycleJob:
     response: GamesByChampResponse
     collected_at: datetime
     latency_ms: int
+    source: int = SOURCE_V3
 
 
 @dataclass
@@ -88,6 +92,7 @@ class Scheduler:
         poll_interval: float,
         queue_maxsize: int = 100,
         recovery_probe_cycles: int = DEFAULT_RECOVERY_PROBE_CYCLES,
+        alerter: ThrottledAlerter | None = None,
     ):
         self.http = http
         self.cdn_http = cdn_http
@@ -97,6 +102,7 @@ class Scheduler:
         self.legacy_site_params = legacy_site_params
         self.poll_interval = poll_interval
         self.recovery_probe_cycles = recovery_probe_cycles
+        self.alerter = alerter
         self.queue: asyncio.Queue[CycleJob] = asyncio.Queue(maxsize=queue_maxsize)
         self.detectors: dict[int, ChangeDetector] = {league_id: ChangeDetector() for league_id in leagues}
         self.dictionary = MarketDictionary()
@@ -126,7 +132,7 @@ class Scheduler:
             try:
                 response, _ = await fetch_games_by_champ(self.http, league_id, self.site_params)
             except BlockedError as exc:
-                self._stop_if_blocked(exc, context=f"préchargement, ligue {league_id}")
+                await self._stop_if_blocked(exc, context=f"préchargement, ligue {league_id}")
                 return
             except (ServerError, ParserError) as exc:
                 log.warning("préchargement impossible pour la ligue %s (%s) : le premier cycle s'en chargera", league_id, exc)
@@ -134,10 +140,26 @@ class Scheduler:
             async with self.db_pool.acquire() as conn:
                 await preload_from_db(conn, self.detectors[league_id], [g.id for g in response.games])
 
-    def _stop_if_blocked(self, exc: BlockedError, *, context: str) -> None:
+    async def _send_alert(self, key: str, subject: str, message: str) -> None:
+        """Envoie une alerte si un ``ThrottledAlerter`` est configuré. Ne lève jamais : une alerte
+        qui échoue est déjà journalisée par ``AlertSender``, elle ne doit jamais interrompre la
+        collecte elle-même."""
+        if self.alerter is not None:
+            await self.alerter.alert(key, subject, message)
+
+    async def _stop_if_blocked(self, exc: BlockedError, *, context: str) -> None:
         log.critical("BLOQUÉ par le site (%s) : %s — arrêt de l'ordonnanceur, aucun contournement", context, exc)
         self.metrics.blocked = True
+        metrics.blocked_total.labels(source="melbet").inc()
         self.stop()
+        # Attendue (pas « fire and forget ») : le programme s'arrête juste après, un envoi non
+        # attendu risquerait d'être interrompu par la fermeture de la boucle d'événements avant
+        # d'aboutir, alors que c'est justement l'alerte la plus importante à ne pas perdre.
+        await self._send_alert(
+            "blocked", "🛑 Collecteur bloqué",
+            f"Le site a bloqué le collecteur ({context}) : {exc}\nL'ordonnanceur s'est arrêté, "
+            "aucune tentative de contournement n'a été faite. Une intervention humaine est nécessaire.",
+        )
 
     # ------------------------------------------------------------------ pas unitaires (testables)
 
@@ -145,17 +167,30 @@ class Scheduler:
         try:
             return await fetch_games_by_champ_legacy(self.http, league_id, self.leagues[league_id], self.legacy_site_params)
         except BlockedError as exc:
-            self._stop_if_blocked(exc, context=f"source de secours, ligue {league_id}")
+            await self._stop_if_blocked(exc, context=f"source de secours, ligue {league_id}")
             return None
-        except (ServerError, ParserError) as exc:
+        except ParserError as exc:
+            metrics.parser_errors_total.labels(source="legacy", league=str(league_id)).inc()
             log.error("source de secours également en échec pour la ligue %s (%s) : %s", league_id, type(exc).__name__, exc)
             self.metrics.errors += 1
+            await self._log_collection(league_id=league_id, source=SOURCE_LEGACY, endpoint="champzip+gamezip",
+                                        ok=False, error=str(exc))
+            return None
+        except ServerError as exc:
+            log.error("source de secours également en échec pour la ligue %s (%s) : %s", league_id, type(exc).__name__, exc)
+            self.metrics.errors += 1
+            await self._log_collection(league_id=league_id, source=SOURCE_LEGACY, endpoint="champzip+gamezip",
+                                        ok=False, error=str(exc))
             return None
 
     async def _mark_degraded(self, league_id: int, exc: ParserError) -> None:
+        metrics.parser_errors_total.labels(source="melbet", league=str(league_id)).inc()
         already_degraded = league_id in self._degraded
         self._degraded.add(league_id)
         self._probe_countdown[league_id] = self.recovery_probe_cycles
+        payload = exc.payload[:DEAD_LETTER_PAYLOAD_LIMIT]
+        async with self.db_pool.acquire() as conn:
+            await conn.execute(queries.INSERT_DEAD_LETTER, 1, exc.endpoint, league_id, str(exc), payload, len(exc.payload))
         if not already_degraded:
             log.critical(
                 "structure inattendue de la source principale pour la ligue %s (%s) : "
@@ -163,9 +198,23 @@ class Scheduler:
                 league_id, exc, self.recovery_probe_cycles,
             )
             self.metrics.schema_changes_detected += 1
-        payload = exc.payload[:DEAD_LETTER_PAYLOAD_LIMIT]
+            metrics.schema_changes_total.labels(league=str(league_id)).inc()
+            await self._send_alert(
+                f"degraded:{league_id}", f"⚠️ Source de secours activée (ligue {league_id})",
+                f"La source principale ne correspond plus au schéma attendu pour la ligue {league_id} : "
+                f"{exc}\nLa collecte continue via la source de secours (plus lente). "
+                f"Un nouvel essai automatique aura lieu dans environ {self.recovery_probe_cycles} cycles.",
+            )
+
+    async def _log_collection(self, *, league_id: int, source: int, endpoint: str, ok: bool,
+                               http_status: int | None = None, latency_ms: int | None = None,
+                               n_games: int | None = None, n_rows_written: int | None = None,
+                               error: str | None = None) -> None:
         async with self.db_pool.acquire() as conn:
-            await conn.execute(queries.INSERT_DEAD_LETTER, 1, exc.endpoint, league_id, str(exc), payload, len(exc.payload))
+            await conn.execute(
+                queries.INSERT_COLLECTION_LOG, datetime.now(timezone.utc), league_id, source, endpoint,
+                ok, http_status, latency_ms, n_games, n_rows_written, error,
+            )
 
     async def poll_once(self, league_id: int) -> bool:
         """Un cycle de sondage pour une ligue : récupère et met en file. Retourne ``False`` si un
@@ -179,11 +228,12 @@ class Scheduler:
             self._probe_countdown[league_id] -= 1
             probing_recovery = self._probe_countdown[league_id] <= 0
 
+        source = SOURCE_V3
         if league_id not in self._degraded or probing_recovery:
             try:
                 response, latency_ms = await fetch_games_by_champ(self.http, league_id, self.site_params)
             except BlockedError as exc:
-                self._stop_if_blocked(exc, context=f"sondage, ligue {league_id}")
+                await self._stop_if_blocked(exc, context=f"sondage, ligue {league_id}")
                 return False
             except ParserError as exc:
                 await self._mark_degraded(league_id, exc)
@@ -191,41 +241,67 @@ class Scheduler:
                 if result is None:
                     return not self.stopping
                 response, latency_ms = result
+                source = SOURCE_LEGACY
             except ServerError as exc:
                 log.error("cycle ignoré pour la ligue %s (%s) : %s", league_id, type(exc).__name__, exc)
                 self.metrics.errors += 1
+                await self._log_collection(league_id=league_id, source=SOURCE_V3, endpoint="gamesByChamp",
+                                            ok=False, error=str(exc))
                 return True
             else:
                 if probing_recovery:
                     log.warning("source principale rétablie pour la ligue %s : fin de la dégradation", league_id)
                     self._degraded.discard(league_id)
+                    if self.alerter is not None:
+                        self.alerter.reset(f"degraded:{league_id}")  # une rechute sera signalée sans délai
+                    await self._send_alert(
+                        f"recovered:{league_id}", f"✅ Source principale rétablie (ligue {league_id})",
+                        f"La ligue {league_id} n'utilise plus la source de secours : le site répond de "
+                        "nouveau au format attendu.",
+                    )
         else:
             result = await self._fetch_via_legacy(league_id)
             if result is None:
                 return not self.stopping
             response, latency_ms = result
+            source = SOURCE_LEGACY
 
-        await self.queue.put(CycleJob(league_id, response, datetime.now(timezone.utc), latency_ms))
+        await self.queue.put(CycleJob(league_id, response, datetime.now(timezone.utc), latency_ms, source))
         return True
 
     async def write_once(self, *, timeout: float = 1.0) -> CycleResult | None:
         """Traite un job de la file s'il y en a un dans le délai imparti. Retourne ``None`` si la
         file était vide (permet à l'appelant de revérifier une condition d'arrêt sans bloquer)."""
+        metrics.queue_depth.set(self.queue.qsize())
         try:
             job = await asyncio.wait_for(self.queue.get(), timeout=timeout)
         except (asyncio.TimeoutError, TimeoutError):
             return None
         try:
+            t0 = time.monotonic()
             async with self.db_pool.acquire() as conn:
                 result = await process_cycle(
                     conn, self.detectors[job.league_id], job.response,
                     league_id=job.league_id, collected_at=job.collected_at, latency_ms=job.latency_ms,
+                    source=job.source,
                 )
+            metrics.database_write_seconds.observe(time.monotonic() - t0)
+            league_label = str(job.league_id)
+            metrics.events_collected_total.labels(league=league_label).inc(result.n_games)
+            metrics.odds_rows_written_total.labels(league=league_label).inc(result.n_rows_written)
+            metrics.last_cycle_timestamp_seconds.labels(league=league_label).set_to_current_time()
+            await self._log_collection(
+                league_id=job.league_id, source=job.source,
+                endpoint="gamesByChamp" if job.source == SOURCE_V3 else "champzip+gamezip",
+                ok=True, http_status=200, latency_ms=job.latency_ms,
+                n_games=result.n_games, n_rows_written=result.n_rows_written,
+            )
             self.metrics.cycles += 1
             self.metrics.rows_written += result.n_rows_written
             return result
         finally:
             self.queue.task_done()
+            metrics.queue_depth.set(self.queue.qsize())
 
     async def refresh_dictionary_once(self) -> int:
         """Un blocage du CDN n'arrête que le rafraîchissement des libellés : ce n'est pas le même
@@ -237,6 +313,13 @@ class Scheduler:
         except BlockedError as exc:
             log.critical("BLOQUÉ par le CDN du dictionnaire : %s — ce rafraîchissement cesse, la collecte des cotes continue", exc)
             self.metrics.dictionary_blocked = True
+            metrics.blocked_total.labels(source="cdn").inc()
+            await self._send_alert(
+                "dictionary_blocked", "⚠️ Dictionnaire des marchés inaccessible",
+                f"Le CDN des libellés de marchés est bloqué ou indisponible : {exc}\n"
+                "La collecte des cotes continue normalement ; seuls les nouveaux marchés resteront "
+                "sans libellé lisible tant que ce n'est pas résolu.",
+            )
             return 0
 
     async def reconcile_results_once(self) -> int:
@@ -248,7 +331,7 @@ class Scheduler:
                 async with self.db_pool.acquire() as conn:
                     total += await reconcile_recent(self.http, conn, league_id, self.site_params)
             except BlockedError as exc:
-                self._stop_if_blocked(exc, context=f"réconciliation des résultats, ligue {league_id}")
+                await self._stop_if_blocked(exc, context=f"réconciliation des résultats, ligue {league_id}")
                 return total
         return total
 
@@ -264,7 +347,7 @@ class Scheduler:
                         should_stop=lambda: self.stopping,  # arrêt réactif entre deux fenêtres
                     )
             except BlockedError as exc:
-                self._stop_if_blocked(exc, context=f"rattrapage des résultats, ligue {league_id}")
+                await self._stop_if_blocked(exc, context=f"rattrapage des résultats, ligue {league_id}")
                 return total
         return total
 

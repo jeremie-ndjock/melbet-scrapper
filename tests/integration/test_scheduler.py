@@ -101,12 +101,27 @@ def make_http(handler, *, retry: RetryConfig | None = None) -> HttpClient:
                        client=inner, retry=retry or RetryConfig(max_attempts=1))
 
 
+class FakeAlerter:
+    """Remplace ``ThrottledAlerter`` dans les tests : enregistre les alertes sans réseau réel."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, str, str]] = []
+
+    async def alert(self, key: str, subject: str, message: str) -> bool:
+        self.calls.append((key, subject, message))
+        return True
+
+    def reset(self, key: str) -> None:
+        pass
+
+
 def make_scheduler(db_pool, melbet: FakeMelbet, cdn: FakeCdn, *, leagues=None, queue_maxsize=100,
-                    recovery_probe_cycles=12) -> Scheduler:
+                    recovery_probe_cycles=12, alerter=None) -> Scheduler:
     return Scheduler(
         http=make_http(melbet.handler), cdn_http=make_http(cdn.handler), db_pool=db_pool,
         leagues=leagues or LEAGUES, site_params=SITE_PARAMS, legacy_site_params=SITE_PARAMS,
         poll_interval=5.0, queue_maxsize=queue_maxsize, recovery_probe_cycles=recovery_probe_cycles,
+        alerter=alerter,
     )
 
 
@@ -299,3 +314,118 @@ async def test_dictionary_and_results_wrappers_reach_all_leagues(db_pool):
     async with db_pool.acquire() as conn:
         checkpoints = {r["key"] for r in await conn.fetch("SELECT key FROM checkpoints WHERE worker = 'results'")}
     assert checkpoints == {f"backfill_{lid}" for lid in LEAGUES}  # un point de contrôle par ligue
+
+
+# ---------------------------------------------------------------- alertes et journal de collecte
+
+async def test_blocked_sends_an_alert(db_pool):
+    melbet = FakeMelbet()
+    alerter = FakeAlerter()
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, alerter=alerter)
+    melbet.blocked = True
+
+    await sched.poll_once(MK_X)
+
+    assert len(alerter.calls) == 1
+    key, subject, message = alerter.calls[0]
+    assert key == "blocked" and "bloqué" in subject.lower()
+
+
+async def test_schema_change_sends_exactly_one_alert_across_several_degraded_cycles(db_pool):
+    melbet = FakeMelbet()
+    melbet.v3_schema_broken = True
+    alerter = FakeAlerter()
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, recovery_probe_cycles=100, alerter=alerter)
+
+    await sched.poll_once(MK_X)
+    await sched.write_once()
+    await sched.poll_once(MK_X)  # toujours dégradé : ne doit pas ré-alerter
+    await sched.write_once()
+
+    degraded_alerts = [c for c in alerter.calls if c[0].startswith("degraded:")]
+    assert len(degraded_alerts) == 1
+
+
+async def test_recovery_sends_an_alert_and_resets_the_throttle(db_pool):
+    melbet = FakeMelbet()
+    melbet.v3_schema_broken = True
+    alerter = FakeAlerter()
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"}, recovery_probe_cycles=1, alerter=alerter)
+
+    await sched.poll_once(MK_X)  # dégradation
+    await sched.write_once()
+    melbet.v3_schema_broken = False
+    await sched.poll_once(MK_X)  # rétablissement (probe au cycle suivant)
+    await sched.write_once()
+
+    kinds = [c[0].split(":")[0] for c in alerter.calls]
+    assert kinds == ["degraded", "recovered"]
+
+
+async def test_dictionary_blocked_sends_an_alert_without_stopping_the_scheduler(db_pool):
+    melbet = FakeMelbet()
+    cdn = FakeCdn()
+    alerter = FakeAlerter()
+    sched = make_scheduler(db_pool, melbet, cdn, leagues={MK_X: "x"}, alerter=alerter)
+
+    # Il faut d'abord des cotes non résolues en base, sans quoi refresh_dictionary_once n'a rien à
+    # chercher et ne touche jamais le CDN (voir test_dictionary_and_results_wrappers_reach_all_leagues).
+    await sched.poll_once(MK_X)
+    await sched.write_once()
+
+    def blocked_cdn(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403)
+    sched.cdn_http = make_http(blocked_cdn)
+
+    n = await sched.refresh_dictionary_once()
+    assert n == 0
+    assert sched.metrics.dictionary_blocked is True
+    assert sched.stopping is False  # un blocage du CDN n'arrête pas la collecte des cotes
+    assert any(c[0] == "dictionary_blocked" for c in alerter.calls)
+
+
+async def test_successful_cycle_is_recorded_in_collection_log_with_correct_source(db_pool):
+    melbet = FakeMelbet()
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"})
+
+    await sched.poll_once(MK_X)
+    await sched.write_once()
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT source, ok, n_games, n_rows_written FROM collection_log WHERE league_id = $1", MK_X)
+    assert row["source"] == 1 and row["ok"] is True and row["n_games"] == 1 and row["n_rows_written"] > 0
+
+
+async def test_legacy_fallback_cycle_is_recorded_with_legacy_source_not_v3(db_pool):
+    """Un vrai défaut trouvé pendant l'étape 8 : les cotes de la source de secours étaient
+    marquées comme venant de la source principale. Ce test verrouille la correction."""
+    melbet = FakeMelbet()
+    melbet.v3_schema_broken = True
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"})
+
+    await sched.poll_once(MK_X)  # bascule sur la source de secours dès ce cycle
+    await sched.write_once()
+
+    async with db_pool.acquire() as conn:
+        odds_source = await conn.fetchval("SELECT DISTINCT source FROM odds_snapshots")
+        log_source = await conn.fetchval("SELECT source FROM collection_log WHERE league_id = $1", MK_X)
+    assert odds_source == 2 and log_source == 2  # 2 = secours, jamais 1 (source principale)
+
+
+async def test_failed_cycle_is_recorded_in_collection_log_as_not_ok(db_pool):
+    melbet = FakeMelbet()
+    melbet.v3_schema_broken = True  # source principale cassée...
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"})
+
+    # ... et la source de secours aussi, pour forcer un cycle entièrement en échec.
+    def broken_secondary(request: httpx.Request) -> httpx.Response:
+        if "GetChampZip" in request.url.path or "GetGameZip" in request.url.path:
+            return httpx.Response(500)
+        return melbet.handler(request)
+    sched.http = make_http(broken_secondary, retry=RetryConfig(max_attempts=1, base_delay_seconds=0.01, max_delay_seconds=0.01))
+
+    await sched.poll_once(MK_X)
+
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT ok, error FROM collection_log WHERE league_id = $1", MK_X)
+    assert row["ok"] is False and row["error"] is not None

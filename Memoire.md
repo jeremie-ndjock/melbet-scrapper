@@ -408,7 +408,7 @@ Dans les deux cas : déduplication sur `(game_id, g, t, p, ts_server)` avec `ts_
   - `.env` : valeurs réelles (SMTP, token du bot Telegram). **Non versionné.**
   - `.env.example` : mêmes variables **sans valeurs**, à versionner.
   - `.gitignore` : exclut `.env`, `.env.*` (sauf `.env.example`), `.playwright-mcp/`, `__pycache__/`, `*.pyc`, `*.bak`.
-- **Variables** : `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_FROM`, `EMAIL_TO`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_USERNAME`. Le `chat_id` a été renseigné automatiquement après le `/start` de l'utilisateur.
+- **Variables** : `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD`, `EMAIL_USE_TLS`, `EMAIL_FROM`, `EMAIL_TO`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `TELEGRAM_USERNAME`, `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD` (généré), `GRAFANA_ADMIN_PASSWORD` (généré, étape 8 ; Grafana n'est joignable qu'en local ou par tunnel SSH, section 9). Le `chat_id` a été renseigné automatiquement après le `/start` de l'utilisateur.
 - **Jamais dans ce fichier ni dans le code** : le mot de passe SMTP et le token du bot. Les journaux masquent ces valeurs.
 - **Recommandation** : le mot de passe SMTP a été transmis par capture d'écran et le token Telegram par message dans la conversation. Si cette conversation est conservée ou partagée, régénérer le mot de passe dans Mailtrap et révoquer le token avec `/revoke` auprès de `@BotFather`, puis mettre à jour `.env`.
 - **Sur le VPS** : `.env` transféré par un canal sûr (`scp`), droits `600`, propriétaire non root, jamais copié dans une image Docker (fourni au conteneur par `env_file` ou variables d'environnement).
@@ -742,9 +742,89 @@ vérification réussie de la source de secours contre le site réel.
 - Le seuil de 12 cycles avant un nouvel essai de la source principale est une valeur de départ,
   jamais mesurée en conditions réelles de panne prolongée.
 
-**Prochaine étape : 8, observabilité et alertes** (métriques Prometheus, tableaux de bord Grafana,
-branchement réel des alertes Telegram et e-mail déjà configurées, script de surveillance externe).
+### Étape 8 : observabilité et alertes (2026-09-21/22) : terminée
+
+**Fichiers créés** :
+
+| Fichier | Rôle |
+|---|---|
+| `src/collector/observability/metrics.py` | Métriques Prometheus (requêtes, latence, reprises, coupe-circuit, blocages, changements de schéma, cotes écrites, profondeur de la file, durée d'écriture, ancienneté du dernier cycle) |
+| `src/collector/observability/logging_setup.py` | Journaux JSON structurés, avec masquage automatique des secrets (filet de sécurité) |
+| `src/collector/alerting.py` | `AlertSender` (Telegram + e-mail, jamais bloquant), `ThrottledAlerter` (une alerte identique au plus toutes les 30 min) |
+| `scripts/watchdog.py` | Surveillance externe (cron), indépendante du reste du code : détecte aussi un conteneur entièrement à l'arrêt |
+| `monitoring/prometheus.yml`, `monitoring/grafana/provisioning/` | Configuration du scraping et tableau de bord Grafana de départ (7 panneaux) |
+| Services `prometheus` et `grafana` dans `docker-compose.yml` | Grafana lié à 127.0.0.1 uniquement (jamais exposé sur Internet, tunnel SSH sur le VPS) |
+| 30 tests supplémentaires | `test_alerting.py`, `test_logging_setup.py`, `test_metrics.py`, `test_watchdog.py`, et des ajouts à `test_scheduler.py` |
+
+**Deux vrais défauts trouvés en écrivant le câblage, avant tout test** :
+1. Les cotes de la source de secours (legacy) étaient marquées comme venant de la source
+   principale dans `odds_snapshots.source`, faussant toute analyse future distinguant les deux
+   sources. Corrigé : `CycleJob` porte désormais la source réellement utilisée, transmise jusqu'à
+   l'écriture.
+2. La table `collection_log`, conçue dès l'étape 3 pour distinguer « la cote n'a pas changé » de
+   « le collecteur était aveugle » (indispensable avec l'option A), n'avait en réalité **jamais été
+   alimentée**. Corrigée : chaque cycle, réussi ou en échec, y est désormais enregistré, avec la
+   bonne source.
+
+**Deux vrais défauts de déploiement trouvés en faisant tourner la vraie image du collecteur**
+(et non plus seulement le conteneur de tests, qui monte tout le dépôt en volume et masque ce genre
+de problème) :
+3. **Le programme principal n'a jamais exécuté les migrations au démarrage.** La base persistante
+   (volume Docker) était restée sur un schéma antérieur à la migration 005 (scores à égalité
+   autorisés). Le tout premier match à égalité rencontré en conditions réelles pendant le
+   rattrapage a fait planter le conteneur en boucle (`NotNullViolationError` sur `winner`).
+   Corrigé : `main.py` applique désormais les migrations en attente avant tout accès à la base,
+   comme le fait déjà l'exécuteur testé depuis l'étape 3.
+4. **L'image de production ne copiait pas le dossier `migrations/`.** Une fois le défaut précédent
+   corrigé, le conteneur plantait immédiatement avec `dossier de migrations introuvable`. Corrigé
+   dans le `Dockerfile` (cible `runtime`).
+
+**Vérification complète en conditions réelles (2026-09-22)**, au-delà des tests automatisés :
+la vraie image reconstruite tourne de façon stable (`healthy`, aucun redémarrage) ; les migrations
+s'appliquent automatiquement au démarrage ; `/metrics` répond avec les compteurs attendus ;
+**Prometheus voit la cible comme `up`** ; **Grafana est en bonne santé, avec la source de données
+et le tableau de bord provisionnés automatiquement** (vérifié via son API) ; **un message d'alerte
+réel a été envoyé sur les deux canaux (Telegram et e-mail) à travers le code réellement déployé**
+(pas un script à part), sans erreur journalisée — réception à confirmer par l'utilisateur, une
+absence d'erreur ne garantissant pas la livraison.
+
+**Ce que les tests automatisés prouvent** : un blocage, une bascule vers la source de secours, un
+rétablissement, et un blocage du CDN déclenchent chacun exactement une alerte (pas de répétition à
+chaque cycle) ; les canaux d'alerte échouent indépendamment l'un de l'autre sans jamais lever
+d'exception ; la limitation par clé supprime les répétitions dans le délai puis les autorise à
+nouveau après, et un « reset » explicite permet de resignaler immédiatement une rechute ; les
+journaux sont un JSON valide avec les champs attendus, et les secrets connus y sont masqués ; le
+script de surveillance externe détecte correctement un cycle en retard, un cycle jamais enregistré,
+et n'alerte pas quand tout est frais ; un cycle réussi ou en échec est bien journalisé dans
+`collection_log` avec la source exacte (secours jamais confondue avec la principale, verrouillé par
+un test dédié).
+
+**Résultat** : 171 tests passés (unitaires et intégration), confirmés sur deux exécutions complètes
+indépendantes, plus la vérification en conditions réelles ci-dessus.
+
+**Commandes** (nouvelles depuis l'étape 8) :
+
+```text
+docker compose up -d db scraper prometheus grafana   # pile complète avec observabilité
+# Grafana : http://127.0.0.1:3000 (identifiant admin, mot de passe dans .env, GRAFANA_ADMIN_PASSWORD)
+# sur le VPS : ssh -L 3000:localhost:3000 <utilisateur>@<vps>, puis la même adresse locale
+python scripts/watchdog.py                            # surveillance externe, à mettre en cron (5 min)
+```
+
+**Points d'attention pour la suite** :
+- Certaines métriques de la liste minimale d'origine ne sont pas mesurées, avec la raison
+  documentée directement dans `metrics.py` (`authentication_failures` sans objet, `duplicates` non
+  mesurable proprement avec `asyncpg`).
+- Le tableau de bord Grafana est un point de départ (7 panneaux) : à enrichir à l'usage.
+- Le script de surveillance externe n'a pas encore été installé en tâche planifiée sur un VPS réel
+  (pas d'accès pour l'instant, Memoire.md section 13).
+- La réception réelle du message d'alerte de vérification reste à confirmer par l'utilisateur.
+
+**Prochaine étape : 9, tests systématiques et couverture** (revue de la couverture globale,
+scénarios de pannes non encore combinés entre eux, documentation des tests existants) — une bonne
+partie du travail de cette étape a déjà été faite au fil des étapes précédentes (140 à 171 tests
+cumulés), il s'agit surtout de consolider et de combler les manques plutôt que de repartir de zéro.
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 7 terminées et testées (140 tests, plus des vérifications réelles à chaque étape)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours en cas de changement de structure, et s'arrête proprement sur un vrai blocage (section 20). Prochaine étape : 8 (observabilité, alertes). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (configurés, pas encore branchés au code) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 8 terminées et testées (171 tests, plus des vérifications réelles à chaque étape, y compris un déploiement complet avec Prometheus et Grafana)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, et applique ses propres migrations au démarrage. Prochaine étape : 9 (consolidation des tests). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).

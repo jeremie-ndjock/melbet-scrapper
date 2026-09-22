@@ -41,9 +41,14 @@ async def process_cycle(
     league_id: int,
     collected_at: datetime,
     latency_ms: int | None,
+    source: int = writer.SOURCE_V3,
 ) -> CycleResult:
     """Traite un relevé ``gamesByChamp`` déjà validé : écrit les matchs, leur état, et les
     changements de cotes. Une transaction par cycle : le relevé est écrit en entier ou pas du tout.
+
+    ``source`` doit refléter la source réellement interrogée pour ce relevé (v3 ou secours) : les
+    cotes de la source de secours ne doivent jamais être marquées comme venant de la source
+    principale, sous peine de fausser toute analyse ultérieure distinguant les deux.
     """
     n_rows = 0
     async with conn.transaction():
@@ -58,7 +63,7 @@ async def process_cycle(
             changes = detector.diff(game.id, current)
             n_rows += await writer.write_odds_batch(
                 conn, changes, league_id=league_id, ts_server=ts_server,
-                collected_at=collected_at, latency_ms=latency_ms,
+                collected_at=collected_at, latency_ms=latency_ms, source=source,
             )
 
     return CycleResult(n_games=len(response.games), n_rows_written=n_rows)

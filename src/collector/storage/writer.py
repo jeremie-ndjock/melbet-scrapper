@@ -14,6 +14,7 @@ from ..sources.v3.models import Game
 from . import queries
 
 SOURCE_V3 = 1
+SOURCE_LEGACY = 2
 
 
 async def upsert_event(conn: asyncpg.Connection, game: Game, league_id: int, *, status: str, seen_at: datetime) -> None:

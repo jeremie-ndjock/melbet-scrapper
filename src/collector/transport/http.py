@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from ..observability import metrics
 from .errors import BlockedError, ServerError
 from .ratelimit import CircuitBreaker, CircuitOpenError, RateLimiter
 
@@ -54,7 +55,9 @@ class HttpClient:
         circuit_breaker: CircuitBreaker | None = None,
         retry: RetryConfig | None = None,
         client: httpx.AsyncClient | None = None,
+        source_label: str = "unknown",
     ):
+        self.source_label = source_label
         self._retry = retry or RetryConfig()
         self._rate_limiter = rate_limiter or RateLimiter(1.0)
         self._circuit = circuit_breaker or CircuitBreaker(failure_threshold=5, recovery_seconds=30)
@@ -83,9 +86,14 @@ class HttpClient:
         sur 403/429 ; lève ``ServerError`` si toutes les tentatives transitoires ont échoué."""
         url = f"{path}?{self._sorted_query(params)}" if params else path
         last_error: Exception | None = None
+        src = self.source_label
 
         for attempt in range(1, self._retry.max_attempts + 1):
-            self._circuit.before_call()  # lève CircuitOpenError si ouvert
+            try:
+                self._circuit.before_call()  # lève CircuitOpenError si ouvert
+            except CircuitOpenError:
+                metrics.circuit_open_total.labels(source=src).inc()
+                raise
             await self._rate_limiter.wait()
             t0 = time.perf_counter()
             try:
@@ -93,6 +101,7 @@ class HttpClient:
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 self._circuit.on_failure()
                 last_error = exc
+                metrics.requests_total.labels(source=src, endpoint=path, outcome="timeout").inc()
                 await self._backoff(attempt)
                 continue
 
@@ -100,21 +109,27 @@ class HttpClient:
 
             if response.status_code in (403, 429):
                 self._circuit.on_failure()
+                metrics.requests_total.labels(source=src, endpoint=path, outcome="blocked").inc()
+                metrics.blocked_total.labels(source=src).inc()
                 raise BlockedError(response.status_code, response.text[:200])
 
             if response.status_code >= 500:
                 self._circuit.on_failure()
                 last_error = ServerError(f"HTTP {response.status_code}")
+                metrics.requests_total.labels(source=src, endpoint=path, outcome="server_error").inc()
                 await self._backoff(attempt)
                 continue
 
             self._circuit.on_success()
+            metrics.requests_total.labels(source=src, endpoint=path, outcome="success").inc()
+            metrics.request_latency_seconds.labels(source=src, endpoint=path).observe(latency_ms / 1000)
             return FetchResult(response.status_code, response.text, latency_ms)
 
         assert last_error is not None
         raise ServerError(f"échec après {self._retry.max_attempts} tentatives : {last_error}") from last_error
 
     async def _backoff(self, attempt: int) -> None:
+        metrics.retries_total.labels(source=self.source_label).inc()
         delay = min(self._retry.base_delay_seconds * (2 ** (attempt - 1)), self._retry.max_delay_seconds)
         delay *= 0.5 + random.random()  # jitter : évite que des cycles synchronisés ne réessaient ensemble
         log.warning("tentative %d/%d échouée, nouvelle tentative dans %.1fs", attempt, self._retry.max_attempts, delay)

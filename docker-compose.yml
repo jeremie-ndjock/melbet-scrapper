@@ -1,6 +1,9 @@
-# Étapes 3 et 6 : base de données et collecteur. Prometheus et Grafana viendront à l'étape 8.
-# Aucun port n'est publié : la base n'est joignable que depuis le réseau Docker (accès manuel :
-# `docker compose exec db psql -U $POSTGRES_USER $POSTGRES_DB`).
+# Étapes 3, 6 et 8 : base de données, collecteur, métriques et tableaux de bord.
+# Aucun port sensible n'est publié : la base et Prometheus ne sont joignables que depuis le réseau
+# Docker (accès manuel à la base : `docker compose exec db psql -U $POSTGRES_USER $POSTGRES_DB`).
+# Grafana est lié à 127.0.0.1 uniquement (jamais exposé sur Internet, même sans pare-feu) ; sur le
+# VPS, s'y connecter par tunnel SSH (`ssh -L 3000:localhost:3000 <utilisateur>@<vps>`), voir
+# docs/architecture.md, décision D4.
 name: oddscollector
 
 services:
@@ -39,6 +42,39 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    env_file:
+      - .env  # canaux d'alerte (EMAIL_*, TELEGRAM_*) : voir Memoire.md, section 19
+    expose:
+      - "9100"  # métriques Prometheus, accessibles uniquement depuis le réseau Docker
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9100/metrics', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - scraper
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3000:3000"  # jamais 0.0.0.0 : accès local ou par tunnel SSH uniquement
+    depends_on:
+      - prometheus
 
   # Tests d'intégration : `docker compose --profile test run --rm tests`
   tests:
@@ -56,3 +92,5 @@ services:
 
 volumes:
   db_data:
+  prometheus_data:
+  grafana_data:

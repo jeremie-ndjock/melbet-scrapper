@@ -32,6 +32,16 @@ legacy_site_params:
 scheduler:
   poll_interval_seconds: 5
 
+observability:
+  # Port HTTP servant les métriques Prometheus (/metrics). Non exposé hors du réseau Docker
+  # (voir docker-compose.yml) : seul Prometheus, dans le même réseau, y accède.
+  metrics_port: 9100
+
+alerting:
+  # Une même alerte (même clé) n'est renvoyée qu'après ce délai, pour ne pas harceler
+  # l'utilisateur ni dépasser le quota du domaine de démonstration Mailtrap (Memoire.md section 12).
+  cooldown_seconds: 1800
+
 dictionary:
   base_url: https://v3.cdnafric.com
   refresh_interval_hours: 6

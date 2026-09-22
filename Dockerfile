@@ -18,11 +18,15 @@ ENV PYTHONPATH=/app/src
 USER app
 CMD ["pytest"]
 
-# Étape 6 : image minimale d'exécution du collecteur. Durcissement complet (utilisateur non root
-# déjà en place ; journaux, healthcheck, image plus petite) prévu à l'étape 10.
+# Étapes 6 et 8 : image minimale d'exécution du collecteur. `migrations/` est indispensable : le
+# programme les applique lui-même au démarrage (voir main.py) — un oubli ici passe inaperçu tant
+# qu'on ne teste qu'avec le conteneur `tests`, qui monte tout le dépôt en volume et masque le
+# problème (trouvé lors d'un essai réel de déploiement, étape 8). Durcissement complet
+# (utilisateur non root déjà en place ; journaux, image plus petite) prévu à l'étape 10.
 FROM base AS runtime
 COPY src ./src
 COPY config ./config
+COPY migrations ./migrations
 ENV PYTHONPATH=/app/src
 USER app
 CMD ["python", "-m", "collector.main"]

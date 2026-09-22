@@ -1,0 +1,52 @@
+{
+  "title": "Collecteur de cotes",
+  "uid": "collector-overview",
+  "timezone": "utc",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "title": "Cycles écrits par minute, par ligue", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [{ "expr": "rate(collector_events_collected_total[5m]) * 60", "legendFormat": "ligue {{league}}" }]
+    },
+    {
+      "id": 2, "title": "Lignes de cotes écrites par minute, par ligue", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [{ "expr": "rate(collector_odds_rows_written_total[5m]) * 60", "legendFormat": "ligue {{league}}" }]
+    },
+    {
+      "id": 3, "title": "Ancienneté du dernier cycle réussi (secondes), par ligue", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [{ "expr": "time() - collector_last_cycle_timestamp_seconds", "legendFormat": "ligue {{league}}" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 60 }
+      ] } } }
+    },
+    {
+      "id": 4, "title": "Profondeur de la file d'écriture", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [{ "expr": "collector_queue_depth" }]
+    },
+    {
+      "id": 5, "title": "Requêtes par issue et par source", "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [{ "expr": "rate(collector_requests_total[5m]) * 60", "legendFormat": "{{source}} / {{outcome}}" }]
+    },
+    {
+      "id": 6, "title": "Bascules vers la source de secours (cumul)", "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "targets": [{ "expr": "sum(collector_schema_changes_total)" }]
+    },
+    {
+      "id": 7, "title": "Blocages détectés (cumul)", "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "targets": [{ "expr": "sum(collector_blocked_total)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 }
+      ] } } }
+    }
+  ]
+}
