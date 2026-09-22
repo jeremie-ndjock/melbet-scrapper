@@ -25,10 +25,14 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # Charge .env pour connaître POSTGRES_USER / POSTGRES_DB (jamais affichés ni journalisés ici).
+# `.env` peut avoir été copié depuis une machine Windows (fins de ligne CRLF) : un `\r` de fin de
+# ligne resterait invisible mais corromprait chaque valeur (ex. un rôle "collector" avec un `\r`
+# caché, rejeté par PostgreSQL comme un rôle inexistant). Défaut réel trouvé lors du premier
+# déploiement VPS (étape 11) — normalisé ici plutôt que de supposer un fichier toujours propre.
 if [ -f .env ]; then
     set -a
     # shellcheck disable=SC1091
-    source .env
+    source <(tr -d '\r' < .env)
     set +a
 fi
 : "${POSTGRES_USER:?POSTGRES_USER manquant (voir .env)}"

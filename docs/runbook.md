@@ -119,6 +119,19 @@ nano .env   # renseigner EMAIL_*, TELEGRAM_*, POSTGRES_PASSWORD, GRAFANA_ADMIN_P
 docker compose up -d db scraper prometheus grafana
 ```
 
+**Alternative** : copier un `.env` déjà rempli depuis la machine locale plutôt que de tout
+ressaisir (`scp -i oddscollector-key.pem .env ubuntu@<IP>:/opt/oddscollector/.env`). **Piège réel
+rencontré au premier déploiement** : un `.env` édité sous Windows a des fins de ligne CRLF ; une
+fois copié tel quel, tout script qui fait `source .env` sous Linux (c'est le cas de
+`scripts/backup_db.sh` et `scripts/restore_db.sh`) échoue ou pire, charge des valeurs avec un `\r`
+invisible en fin de chaîne (ex. un rôle PostgreSQL "collector" avec un `\r` caché, rejeté comme
+inexistant). Ces deux scripts ont depuis été corrigés pour normaliser les fins de ligne
+automatiquement, mais par précaution, après un `scp` depuis Windows :
+
+```bash
+sed -i 's/\r$//' .env
+```
+
 ## 6. Vérifications post-déploiement
 
 ```bash

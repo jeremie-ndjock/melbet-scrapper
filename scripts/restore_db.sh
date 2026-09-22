@@ -15,10 +15,11 @@ cd "$PROJECT_DIR"
 file="${1:?usage : $0 <fichier .sql.gz>}"
 [ -f "$file" ] || { echo "fichier introuvable : $file" >&2; exit 1; }
 
+# Voir backup_db.sh : normalise une éventuelle fin de ligne Windows (CRLF) avant de sourcer.
 if [ -f .env ]; then
     set -a
     # shellcheck disable=SC1091
-    source .env
+    source <(tr -d '\r' < .env)
     set +a
 fi
 : "${POSTGRES_USER:?POSTGRES_USER manquant (voir .env)}"
