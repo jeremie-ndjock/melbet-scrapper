@@ -946,3 +946,38 @@ vérification réelle en aura la certitude).
 ---
 
 Statut : reconnaissance terminée, architecture validée, **étapes 3 à 10 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape, y compris sauvegarde/restauration réelle de la base TimescaleDB)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, et dispose de scripts de sauvegarde/restauration vérifiés. Prochaine étape : 11 (déploiement VPS réel), en attente de l'accès VPS de l'utilisateur. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS (script vérifié) et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+
+## 22. Clôture de session — 2026-09-22
+
+Session close sur les **étapes 9 et 10**, à la suite des étapes 3 à 8 déjà closes précédemment.
+
+**Fait aujourd'hui** :
+- Étape 9 (tests systématiques et couverture) : mesure objective de la couverture pour la première
+  fois (`pytest-cov`), deux vrais manques trouvés par la mesure (`main.py` jamais testé,
+  `ratelimit.py` couvert seulement en indirect), comblés avec 27 nouveaux tests ciblés. Résultat :
+  171 → 198 tests, couverture 90 % (lignes) → 96 % (branches). Commit `6449aad`.
+- Étape 10 (endurcissement du déploiement) : scripts de sauvegarde/restauration créés **et
+  vérifiés en conditions réelles**, ce qui a révélé un vrai défaut (une sauvegarde `pg_dump`
+  classique de cette base ne se restaure pas telle quelle sur TimescaleDB, corrigé avec les
+  fonctions officielles `timescaledb_pre_restore()`/`timescaledb_post_restore()`) ; journaux Docker
+  bornés (10 × 10 Mo) pour un service qui tourne 24/7 ; `README.md` créé pour un tiers qui
+  reprendrait le projet ; décisions sur la taille d'image et la séparation des rôles de base
+  documentées plutôt que traitées en silence. Commit `0a458b3`.
+- Tout est poussé sur `github.com/jeremie-ndjock/melbet-scrapper` (branche `main`, à jour).
+- Aucun secret vérifié absent des fichiers versionnés à chaque étape (grep systématique avant
+  commit).
+
+**État en fin de session** : étapes 3 à 10 du plan original **toutes terminées et testées**. Seule
+l'étape 11 (déploiement VPS réel) reste, et elle est bloquée sur un élément externe : **l'accès au
+VPS**, toujours non disponible côté utilisateur à la date de clôture (voir section 13). Rien
+d'autre n'est en attente de décision de la part de l'utilisateur pour l'instant.
+
+**À la prochaine session** :
+1. Si le VPS est devenu accessible : démarrer l'étape 11 (runbook de mise en service, déploiement
+   réel, et surtout le test qui ne peut se faire qu'à ce moment-là — le comportement du site
+   depuis la véritable adresse IP du VPS).
+2. Sinon : le projet est dans un état stable et complet pour un développement local ; aucune
+   action urgente n'est requise avant l'accès au VPS.
+3. Point resté ouvert et jamais retranché de la liste des sujets en suspens (section 13/21) : la
+   réception réelle de l'alerte de test envoyée à l'étape 8 n'a jamais été explicitement confirmée
+   par l'utilisateur — à reconfirmer si l'occasion se présente, sans bloquer la suite.
