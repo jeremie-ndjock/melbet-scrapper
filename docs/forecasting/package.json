@@ -1,0 +1,8 @@
+{
+  "name": "forecasting-docs-generator",
+  "private": true,
+  "description": "Génère docs/forecasting/plan_entrainement_mortal_kombat.docx (voir generate.js). Pas du code applicatif du collecteur.",
+  "dependencies": {
+    "docx": "^9.0.0"
+  }
+}

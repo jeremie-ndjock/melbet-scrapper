@@ -1220,3 +1220,37 @@ chaque ligue.
 niveau TCP, pas un problème d'identifiants) pendant cette session de travail — à vérifier côté
 utilisateur dans la console AWS (état de l'instance, groupe de sécurité). Le code est prêt, testé
 et poussé sur GitHub ; le déploiement sur le VPS reste à faire dès que l'accès est rétabli.
+
+**Résolu** : le blocage venait du groupe de sécurité, qui n'autorisait le SSH que depuis l'IP
+détectée à la création (celle du navigateur de l'utilisateur à ce moment-là), pas celle de cet
+environnement d'exécution. Une fois la règle élargie par l'utilisateur, déploiement effectué avec
+succès : migration 008 appliquée automatiquement, service resté sain, et confirmation en
+conditions réelles sur le VPS que le cycle complet fonctionne — annonce pré-match avec portraits
+(`sendMediaGroup`), compte à rebours édité toutes les ~10 s (`editMessageCaption`, 20 appels
+observés en 2 min sur deux matchs simultanés), transition automatique vers le fil manche par
+manche au démarrage (`match_no_of_day` correctement calculé, valeurs 263 et 265 observées —
+bien plus réalistes que les premiers essais locaux, qui manquaient d'historique accumulé).
+
+## 24. Plan d'entraînement de modèles prédictifs (2026-09-23)
+
+À la demande de l'utilisateur, exploration de l'usage des données collectées pour du forecasting :
+un modèle Mortal Kombat X (probabilité que la durée de la manche en cours dépasse un seuil,
+ancrée sur la ligne du marché « Durée du Round », groupe 1074) et un modèle Mortal Kombat 3 (type
+de finish de la manche en cours, cible à 7 classes fortement déséquilibrées — Hara-Kiri à 0,1 %
+identifié comme le vrai facteur limitant du calendrier de collecte, ≈7 semaines pour seulement 100
+exemples).
+
+Document complet livré : **`docs/forecasting/plan_entrainement_mortal_kombat.docx`** (généré via
+`docs/forecasting/generate.js`, bibliothèque `docx` — script conservé pour pouvoir régénérer ou
+faire évoluer le document plus tard). Couvre : définition précise des cibles, ingénierie des
+variables (avec la règle anti-fuite causale, section 4.4 du document), volume de données
+nécessaire chiffré selon la granularité visée, requêtes SQL d'extraction, choix de modèles,
+métriques d'évaluation (comparées à la cote du marché, jamais un chiffre absolu isolé), protocole
+de validation walk-forward, calendrier en 5 phases, risques et limites assumés dès le départ
+(nature simulée du jeu, plancher d'aléa irréductible).
+
+Validé par vérification XSD (`scripts/office/validate.py` du kit `docx` : « All validations
+PASSED! ») faute de LibreOffice disponible sur cette machine pour un rendu visuel complet — un
+défaut réel de bordure de paragraphe a été trouvé et corrigé à cette occasion (docx-js sérialise
+les bordures de paragraphe dans un ordre non conforme au schéma OOXML quel que soit l'ordre fourni
+en entrée ; contournement : fond grisé sans bordure pour les blocs de code du document).

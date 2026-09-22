@@ -19,3 +19,7 @@ htmlcov/
 
 # État interne de l'outil (Claude Code), pas du code du projet — committé par erreur à l'étape 8
 .claude/scheduled_tasks.lock
+
+# Dépendance de build locale (docs/forecasting/generate.js, génération du plan d'entraînement)
+node_modules/
+package-lock.json
