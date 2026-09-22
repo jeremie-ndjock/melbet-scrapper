@@ -998,7 +998,46 @@ et alerting branchés.
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées (254 tests, couverture 95 % en branches, plus des vérifications réelles à chaque étape)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Fil de match Telegram en direct** : un salon dédié par ligue, numéro de match du jour (calculé, combine résultats et matchs en direct), format à emojis, et une annonce pré-match avec portraits des combattants et compte à rebours — tout vérifié avec de vrais envois réels, code poussé sur GitHub. **VPS injoignable en SSH depuis cette session (à vérifier côté utilisateur, console AWS) : le dernier lot de code (salons séparés, numéro corrigé, portraits) n'est pas encore déployé dessus.** Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés) ; fil de match Telegram sur un salon dédié par ligue (vérifié en conditions réelles) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur.
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 11 terminées et déployées en production sur le VPS AWS (254 tests, couverture 95 % en branches, vérifications réelles à chaque étape)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, sauvegarde quotidiennement et est surveillé en externe toutes les 5 min. **Fil de match Telegram en direct, déployé et vérifié en production** : un salon dédié par ligue, numéro de match du jour calculé, format à emojis, annonce pré-match avec portraits et compte à rebours édité toutes les ~10 s, transition automatique vers le suivi manche par manche au démarrage. **Plan d'entraînement de modèles prédictifs livré** (docs/forecasting/plan_entrainement_mortal_kombat.docx). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés, vérifiés) ; fil de match Telegram sur un salon dédié par ligue, déployé en production ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur.
+
+## 25. Clôture de session — 2026-09-23
+
+**Fait aujourd'hui** (à la suite de l'étape 11 déployée la veille) :
+- **Fil de match Telegram en direct** : conçu, implémenté, testé (34 tests) et déployé — vainqueur,
+  temps et type de finish par manche, un message édité par match. Commit `b08f0e8`.
+- **Quatre ajustements demandés après coup**, tous implémentés et vérifiés en conditions réelles
+  avant déploiement : salon Telegram séparé par ligue (l'utilisateur a créé un second groupe),
+  numéro de match du jour corrigé (un vrai problème de méthode trouvé et corrigé : le champ `num`
+  du site n'est pas ce numéro, calcul propre basé sur `results`+`events`), nouveau format à emojis
+  exact, et annonce pré-match avec portraits des combattants (49 images fournies par l'utilisateur)
+  et compte à rebours réutilisant celui du site. Commit `f573f7c`.
+- **Incident opérationnel résolu** : le VPS est devenu injoignable en SSH en cours de session — pas
+  un problème d'identifiants mais le groupe de sécurité, qui n'autorisait que l'ancienne IP
+  détectée à la création. Diagnostiqué (IP sortante de cette session identifiée), corrigé par
+  l'utilisateur dans la console AWS, puis déploiement complet effectué avec succès, vérifié en
+  conditions réelles sur le VPS lui-même (pas seulement en local).
+- **Plan d'entraînement de modèles prédictifs** livré à la demande de l'utilisateur : un document
+  Word complet (12 sections) pour deux modèles distincts — durée de manche (Mortal Kombat X,
+  probabilité ancrée sur la cote du marché) et type de finish (Mortal Kombat 3, 7 classes
+  déséquilibrées). Commit `93811e8`.
+- Tout est testé (254 tests, deux exécutions stables au fil de la session), documenté, et poussé
+  sur `github.com/jeremie-ndjock/melbet-scrapper`.
+
+**État en fin de session** : le collecteur tourne en production réelle et complète sur le VPS —
+cotes, résultats, alertes, sauvegardes, surveillance externe, et désormais le fil de match Telegram
+en direct avec portraits. Les 11 étapes du plan initial et les demandes additionnelles du jour sont
+toutes closes.
+
+**Points restés ouverts, jamais retranchés** :
+- IP Elastic toujours non allouée sur le VPS (`docs/runbook.md`, §3) — l'adresse changerait si
+  l'instance redémarrait.
+- Alerte de budget AWS non confirmée comme configurée.
+- Réception effective, par l'utilisateur, de l'alerte de test envoyée à l'étape 8 jamais
+  explicitement reconfirmée (sans conséquence : les vraies alertes de match, elles, sont
+  confirmées reçues).
+- Le plan d'entraînement de modèles n'est qu'un plan pour l'instant : aucune extraction ni
+  entraînement réel n'a encore été fait (prochaine étape naturelle si l'utilisateur souhaite
+  avancer dessus).
 
 ## 22. Clôture de session — 2026-09-22
 
