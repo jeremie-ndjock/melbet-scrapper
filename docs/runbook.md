@@ -33,8 +33,10 @@ procédure, pas des identifiants.
    eu-west-3**.
 2. Aller dans **EC2 → Instances → Launch instance**.
 3. **Name** : `oddscollector-vps`.
-4. **Application and OS Images** : Ubuntu Server 22.04 LTS (ou la version LTS la plus récente
-   proposée), architecture 64-bit (x86).
+4. **Application and OS Images** : **Ubuntu Server 24.04 LTS** (64-bit x86 — pas la variante
+   « Pro », qui ajoute des fonctionnalités payantes inutiles ici ; pas la LTS la plus récente
+   proposée au moment du choix (26.04) : une LTS avec un peu plus de recul est préférable pour un
+   service qui doit tourner 24/7 sans surprise).
 5. **Instance type** : `m7i-flex.large` (2 vCPU, 8 Go RAM).
 6. **Key pair (login)** : créer une nouvelle paire (`oddscollector-key`), format `.pem`,
    télécharger le fichier et le conserver hors du dépôt git — **il ne doit jamais être commité**
