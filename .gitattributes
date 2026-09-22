@@ -1,0 +1,7 @@
+# Les scripts shell doivent toujours être stockés (et extraits) en fins de ligne LF, quel que
+# soit le système d'exploitation du contributeur : un script .sh avec des CRLF échoue au
+# lancement sous Linux (VPS de production) avec `bad interpreter`. Défaut réel constaté avec un
+# .env copié depuis Windows lors du premier déploiement VPS (étape 11) — jamais avec les scripts
+# eux-mêmes (déjà propres en LF), mais autant l'empêcher explicitement plutôt que de compter sur
+# la configuration locale de chaque contributeur (`core.autocrlf`).
+*.sh text eol=lf
