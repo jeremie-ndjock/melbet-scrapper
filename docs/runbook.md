@@ -2,15 +2,17 @@
 
 Ce document décrit la mise en service du collecteur sur un VPS réel (étape 11 du plan, voir
 `docs/architecture.md` §14 et `Memoire.md` section 13). Choix retenus avec l'utilisateur le
-2026-09-22 : instance **t3.large** (2 vCPU, 8 Go RAM — conforme à l'architecture validée), région
-**eu-west-3 (Paris)**, budget initial **100 $ de crédit AWS**.
+2026-09-22 : instance **m7i-flex.large** (2 vCPU, 8 Go RAM — conforme à l'architecture validée ;
+`t3.large` visée initialement n'était pas proposée par l'assistant de lancement simplifié d'AWS
+sur ce compte, `m7i-flex.large` est l'équivalent exact en vCPU/RAM parmi les options offertes),
+région **eu-west-3 (Paris)**, budget initial **100 $ de crédit AWS**.
 
 **Aucune valeur secrète (mots de passe, clés) n'apparaît dans ce fichier.** Il décrit une
 procédure, pas des identifiants.
 
 ## 1. Pourquoi ces choix
 
-- **t3.large** plutôt que le palier gratuit (`t2.micro`/`t3.micro`, 1 vCPU / 1 Go) : l'architecture
+- **m7i-flex.large** (2 vCPU, 8 Go) plutôt qu'une instance à 1 ou 2 Go de RAM : l'architecture
   validée demande 2 vCPU / 8 Go pour tenir un cycle de 5 s sur deux ligues avec de la marge.
   Coût estimé (à vérifier sur la calculatrice AWS au moment de la création, les tarifs évoluent) :
   de l'ordre de 55 à 70 $/mois en fonctionnement continu selon la région — le crédit de 100 $
@@ -33,7 +35,7 @@ procédure, pas des identifiants.
 3. **Name** : `oddscollector-vps`.
 4. **Application and OS Images** : Ubuntu Server 22.04 LTS (ou la version LTS la plus récente
    proposée), architecture 64-bit (x86).
-5. **Instance type** : `t3.large`.
+5. **Instance type** : `m7i-flex.large` (2 vCPU, 8 Go RAM).
 6. **Key pair (login)** : créer une nouvelle paire (`oddscollector-key`), format `.pem`,
    télécharger le fichier et le conserver hors du dépôt git — **il ne doit jamais être commité**
    (déjà couvert par la règle générale « aucun secret dans le dépôt »).
@@ -159,7 +161,7 @@ Dès la création, dans la console AWS :
 2. Budget de type « Cost budget », montant **80 $** (marge avant d'épuiser le crédit), alerte par
    e-mail à 50 %, 80 % et 100 % du seuil.
 3. Vérifier régulièrement **Billing → Cost Explorer** pour suivre le rythme de consommation réel
-   de l'instance `t3.large` et ajuster si besoin (arrêt temporaire, changement de taille).
+   de l'instance `m7i-flex.large` et ajuster si besoin (arrêt temporaire, changement de taille).
 
 ## 9. Récupération / sinistre
 
