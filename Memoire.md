@@ -885,10 +885,64 @@ correspondre à un vrai scénario de panne ou de comportement attendu, pas à un
 docker compose run --rm tests pytest --cov=collector --cov-report=term-missing -q
 ```
 
-**Prochaine étape : 10, endurcissement du déploiement** (rôle non-root pour PostgreSQL déjà en
-place côté application, image d'exécution encore allégeable, `README.md` pour un tiers qui
-reprendrait le projet, complétude de `.env.example`).
+### Étape 10 : endurcissement du déploiement (2026-09-22) : terminée
+
+**Fichiers créés** :
+
+| Fichier | Rôle |
+|---|---|
+| `scripts/backup_db.sh` | Sauvegarde quotidienne (`pg_dump` compressé, horodaté, rotation locale configurable) |
+| `scripts/restore_db.sh` | Restauration depuis une sauvegarde, avec confirmation explicite avant d'écraser une base non vide |
+| `README.md` | Point d'entrée pour un tiers qui reprendrait le projet (démarrage rapide, tests, sauvegardes, surveillance, structure) |
+| `.gitignore` (mis à jour) | Exclut désormais `.coverage`, `htmlcov/` et `/backups/` (données locales, jamais du code) |
+| `docker-compose.yml` (mis à jour) | Journaux Docker bornés sur tous les services longue durée (`x-logging`, 10 × 10 Mo) ; service `tests` réutilisé (avec `env_file`) pour lancer le watchdog en tâche planifiée |
+
+**Un vrai défaut trouvé en testant réellement la restauration** (et non en supposant que
+`pg_dump`/`psql` suffit, ce qui aurait été l'erreur) : une sauvegarde produite normalement par
+`pg_dump` échoue à se restaurer telle quelle sur une base TimescaleDB — erreur de contrainte de
+clé étrangère sur les chunks internes d'hypertable (`_timescaledb_internal._hyper_1_1_chunk`), qui
+ne sont pas encore repartitionnés au moment où `pg_dump` vérifie les contraintes lors de la
+restauration. Corrigé en encadrant la restauration des deux fonctions officielles de TimescaleDB,
+`SELECT timescaledb_pre_restore();` avant et `SELECT timescaledb_post_restore();` après — **vérifié
+en conditions réelles** : sauvegarde de la base réelle (2,4 Mo), restauration dans une base
+jetable, comptage des lignes après restauration (3336 lignes de cotes, 27 événements, conformes à
+la base d'origine), puis suppression de la base jetable. Sans ce test réel, ce défaut ne serait
+resté qu'une hypothèse de documentation, découvert bien plus tard, en conditions de panne réelle
+sur le VPS — exactement le genre d'écart entre « ça devrait marcher » et « ça marche » que ce
+projet cherche systématiquement à éliminer avant le déploiement.
+
+**Décisions prises et documentées plutôt qu'un travail non fait en silence** :
+- **Taille de l'image d'exécution (219 Mo)** : jugée déjà adéquate. Elle est construite en deux
+  étapes depuis `python:3.12-slim` (déjà nettoyée de ses outils de compilation par l'image
+  officielle elle-même) ; les seules dépendances de production (`asyncpg`, `httpx`, `pydantic`,
+  `PyYAML`, `prometheus-client`) s'installent depuis des paquets binaires précompilés, sans
+  compilateur nécessaire côté projet. Passer à une base `alpine` gagnerait quelques dizaines de Mo
+  au prix d'un risque réel de fragilité de build (bibliothèques C liées à `glibc` absentes sous
+  `musl`, recompilation potentiellement nécessaire) — un mauvais compromis sur un VPS de 50 Go où
+  la taille de l'image n'est pas une contrainte.
+- **Rôle de base de données** : `POSTGRES_USER` n'est déjà pas le superutilisateur `postgres` par
+  défaut (c'est `collector`, avec un mot de passe généré), et cette base est isolée dans son propre
+  conteneur, jamais partagée avec un autre service, jamais exposée en dehors du réseau Docker. Une
+  séparation plus fine (un rôle distinct pour les migrations et un rôle distinct, moins privilégié,
+  pour l'écriture courante) a été envisagée mais écartée pour l'instant : elle ajouterait de la
+  complexité de configuration (deux chaînes de connexion à gérer dans un seul conteneur applicatif)
+  pour un gain de sécurité marginal dans ce contexte à un seul service, une seule base, aucun accès
+  multi-tenant. À reconsidérer si l'architecture évolue vers plusieurs services partageant la base.
+
+**Autres vérifications en conditions réelles (2026-09-22)**, sur la vraie pile (pas seulement les
+tests automatisés) : reconstruction de l'image `scraper`, redémarrage propre (`status=running`,
+migrations « à jour, 5 appliquées », aucune erreur), confirmation via `docker inspect` que la
+limite de journaux (`max-size: 10m, max-file: 10`) est bien appliquée au conteneur.
+
+**Résultat** : 198 tests toujours au vert (aucune régression, ces changements ne touchent pas le
+code applicatif testé), plus la vérification réelle de sauvegarde/restauration ci-dessus.
+
+**Prochaine étape : 11, déploiement VPS réel**, en attente de l'accès au VPS annoncé par
+l'utilisateur (voir section 13) : runbook de mise en service, et surtout le test qui ne peut se
+faire qu'à ce moment-là — le comportement du site depuis la véritable adresse IP du VPS (aucune
+raison de penser qu'il diffère, aucune protection anti-bot observée jusqu'ici, mais seule une
+vérification réelle en aura la certitude).
 
 ---
 
-Statut : reconnaissance terminée, architecture validée, **étapes 3 à 9 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape, y compris un déploiement complet avec Prometheus et Grafana)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, et applique ses propres migrations au démarrage. Prochaine étape : 10 (endurcissement du déploiement). Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).
+Statut : reconnaissance terminée, architecture validée, **étapes 3 à 10 terminées et testées (198 tests, couverture 96 % en branches, plus des vérifications réelles à chaque étape, y compris sauvegarde/restauration réelle de la base TimescaleDB)**. Le collecteur s'identifie honnêtement, ne contourne jamais un blocage, bascule automatiquement sur une source de secours, alerte réellement par Telegram et e-mail, applique ses propres migrations au démarrage, journalise sans croissance illimitée, et dispose de scripts de sauvegarde/restauration vérifiés. Prochaine étape : 11 (déploiement VPS réel), en attente de l'accès VPS de l'utilisateur. Décisions : option A ; rétention indéfinie ; deux ligues (Mortal Kombat X et Mortal Kombat 3) ; alerting e-mail et Telegram (branchés et vérifiés, réception à confirmer) ; sauvegardes quotidiennes sur le VPS (script vérifié) et récupération par l'utilisateur ; pas d'accès au VPS pour l'instant (développement local dans Docker).

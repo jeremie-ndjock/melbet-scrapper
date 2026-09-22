@@ -228,7 +228,7 @@ Les ligues sont définies dans `config/leagues.yaml` : ajouter une ligue est un 
 | 7. Résilience **(terminée)** | Transport complet, `ProxyPool`, coupe-circuit, source de secours avec bascule automatique | Tous les scénarios de panne pertinents pour ce site passent (140 tests, plus une vérification réelle de la source de secours ; voir Memoire.md, journal d'étape) |
 | 8. Observabilité **(terminée)** | Métriques, tableaux de bord, alertes, watchdog | Prometheus/Grafana vérifiés en conditions réelles ; alerte réelle envoyée sur les deux canaux (réception à confirmer) ; voir Memoire.md, journal d'étape |
 | 9. Tests **(terminée)** | Couverture unitaire, intégration, pannes | 198 tests, couverture mesurée 96 % (branches) ; deux exécutions indépendantes stables ; voir Memoire.md, journal d'étape |
-| 10. Docker | Images, Compose, sauvegardes | `docker compose up` de zéro fonctionne |
+| 10. Docker **(terminée)** | Images, Compose, sauvegardes | Sauvegarde et restauration testées en conditions réelles (TimescaleDB) ; journaux Docker bornés ; README.md ; voir Memoire.md, journal d'étape |
 | 11. VPS | Runbook, déploiement, **test géographique depuis l'IP néerlandaise** | Collecte stable 24 h |
 
 À chaque étape : fichiers créés, code complet, commandes d'installation, tests à exécuter, résultats attendus, problèmes possibles.

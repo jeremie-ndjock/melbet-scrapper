@@ -13,3 +13,6 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+
+# Sauvegardes locales produites par scripts/backup_db.sh (des données, jamais du code)
+/backups/

@@ -1,15 +1,28 @@
-# Étapes 3, 6 et 8 : base de données, collecteur, métriques et tableaux de bord.
+# Étapes 3, 6, 8 et 10 : base de données, collecteur, métriques, tableaux de bord, endurcissement.
 # Aucun port sensible n'est publié : la base et Prometheus ne sont joignables que depuis le réseau
 # Docker (accès manuel à la base : `docker compose exec db psql -U $POSTGRES_USER $POSTGRES_DB`).
 # Grafana est lié à 127.0.0.1 uniquement (jamais exposé sur Internet, même sans pare-feu) ; sur le
 # VPS, s'y connecter par tunnel SSH (`ssh -L 3000:localhost:3000 <utilisateur>@<vps>`), voir
 # docs/architecture.md, décision D4.
+#
+# Sauvegardes : voir scripts/backup_db.sh (à lancer par cron sur le VPS, en dehors de cette pile).
 name: oddscollector
+
+x-logging: &default-logging
+  # Un collecteur tourne en continu (24/7) : sans limite, les journaux JSON de docker (stdout des
+  # conteneurs) grossiraient indéfiniment sur le disque du VPS. 10 fichiers de 10 Mo est largement
+  # suffisant pour l'investigation (le contenu utile équivalent à plusieurs semaines de journaux
+  # normaux), sans risquer de saturer les 50 Go du VPS sur la durée.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "10"
 
 services:
   db:
     image: timescale/timescaledb:2.30.1-pg16
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -25,14 +38,14 @@ services:
       retries: 20
       start_period: 10s
 
-  # Collecteur (étape 6). Image minimale pour l'instant : voir Dockerfile, cible `runtime`.
-  # Lancement manuel : `docker compose up scraper`. Le durcissement (secrets d'alerting,
-  # utilisateur applicatif dédié en base, etc.) est prévu aux étapes 8 et 10.
+  # Collecteur (étape 6). Image minimale : voir Dockerfile, cible `runtime` (utilisateur non root
+  # dédié, dépendances de production uniquement). Lancement manuel : `docker compose up scraper`.
   scraper:
     build:
       context: .
       target: runtime
     restart: unless-stopped
+    logging: *default-logging
     # Un rattrapage de résultats en cours peut prendre jusqu'à environ une minute par ligue à
     # s'interrompre proprement (une requête réseau à la fois, jamais annulée en plein vol) :
     # laisser à `docker stop` le temps de le faire avant d'envoyer SIGKILL.
@@ -56,6 +69,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.14.0
     restart: unless-stopped
+    logging: *default-logging
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -65,6 +79,7 @@ services:
   grafana:
     image: grafana/grafana:13.2.2
     restart: unless-stopped
+    logging: *default-logging
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -76,7 +91,11 @@ services:
     depends_on:
       - prometheus
 
-  # Tests d'intégration : `docker compose --profile test run --rm tests`
+  # Tests d'intégration : `docker compose --profile test run --rm tests`. Réutilisé tel quel
+  # (mêmes dépendances, même réseau Docker vers `db`) pour lancer `scripts/watchdog.py` en tâche
+  # planifiée : `docker compose --profile test run --rm tests python scripts/watchdog.py` (voir
+  # README.md). `env_file` lui donne accès aux canaux d'alerte (EMAIL_*, TELEGRAM_*) sans dupliquer
+  # de configuration.
   tests:
     profiles: ["test"]
     build:
@@ -87,6 +106,8 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    env_file:
+      - .env
     volumes:
       - .:/app
 
