@@ -1133,4 +1133,13 @@ transmission de la ligue) ; `scheduler.py` (transmet `league_id`/`league_name`, 
 l'ordonnanceur). 234 tests au total (+3), couverture 96 % maintenue.
 
 **Vérifié en conditions réelles** : un vrai message envoyé pour chacune des deux ligues, à partir
-de vrais matchs en cours, avec le format ci-dessus. Déployé sur le VPS le jour même.
+de vrais matchs en cours, avec le format ci-dessus. Déployé sur le VPS le jour même : migration
+007 appliquée automatiquement, service resté sain, `editMessageText` réussi observé dans les
+journaux dès le premier cycle.
+
+**Détail transitoire observé, sans conséquence** : les matchs déjà suivis par `match_feed` avant
+ce déploiement (créés par la version précédente du code, sans la colonne `match_no_of_day`) n'ont
+et n'auront jamais de numéro affiché pour ce match précis — `format_match_message` omet
+simplement la ligne « Match n°X » quand la valeur est absente (jamais de plantage, jamais de
+« None » affiché). Se résorbe de lui-même : tout match qui démarre après ce déploiement obtient
+son numéro normalement, comme vérifié manuellement.
