@@ -30,7 +30,9 @@ log = logging.getLogger("collector.main")
 
 async def amain() -> int:
     settings = load_settings()
-    leagues = {league.id: league.name for league in load_leagues()}
+    all_leagues = load_leagues()
+    leagues = {league.id: league.name for league in all_leagues}
+    league_sport_ids = {league.id: league.sport_id for league in all_leagues}
     t = settings.transport
 
     alert_config = load_alert_config_from_env()
@@ -80,6 +82,7 @@ async def amain() -> int:
 
     scheduler = Scheduler(
         http=http, cdn_http=cdn_http, db_pool=db_pool, leagues=leagues,
+        league_sport_ids=league_sport_ids,
         site_params=settings.site_params, legacy_site_params=settings.legacy_site_params,
         poll_interval=settings.poll_interval_seconds, alerter=alerter,
         live_feed=live_feed, pre_match=pre_match,

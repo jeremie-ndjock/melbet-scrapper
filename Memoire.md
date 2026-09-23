@@ -1525,3 +1525,64 @@ identique n'écrivant strictement aucune ligne supplémentaire (option A intacte
 **Prochaine étape naturelle** : un parseur de résultats pour le format `"S:S (P:P,P:P,...)"`
 (nettement plus simple que celui de Mortal Kombat, pas de type de finish à décoder), puis
 l'activation réelle dans `config/leagues.yaml` et un déploiement complet sur le VPS.
+
+## 29. Parseur de résultats AI Table Tennis, rendu générique par sport (2026-09-23)
+
+Suite logique de l'étape 28 : `results.py` (rattrapage, réconciliation, `store_results`) était
+câblé en dur pour Mortal Kombat. Généralisé pour accepter n'importe quel sport sans dupliquer la
+machinerie de fenêtrage/points de contrôle.
+
+**Un vrai défaut trouvé en généralisant** : `fetch_results` envoyait `sportIds=103` codé en dur
+dans la requête, jamais paramétré tant qu'un seul sport était collecté. Un rattrapage AI Table
+Tennis lancé sans corriger cela aurait silencieusement interrogé les résultats Mortal Kombat pour
+les champIds AI Table Tennis (réponse vide ou incohérente selon le site, jamais une erreur claire).
+Corrigé en rendant `sport_id` un paramètre obligatoire (mot-clé) de `fetch_results`,
+`store_results`, `backfill_results` et `reconcile_recent` — impossible désormais d'oublier de le
+passer. Un test de régression dédié (`test_backfill_sends_the_given_sport_id_and_uses_the_given_parser`)
+vérifie que la requête HTTP réelle transmet bien `sportIds=10` et pas `103`.
+
+**Nouveau format de score** : `TableTennisScore`/`ParsedSet`/`parse_table_tennis_score` décodent
+`"2:0 (11:7,11:7)"` (score de sets, puis score de points par set) — plus simple que Mortal Kombat
+(pas de type de finish, pas de Mercy). Mêmes principes de tolérance déjà validés pour Mortal
+Kombat : un set illisible ou à égalité est ignoré sans faire échouer tout le match ; un score final
+à égalité est accepté sans vainqueur plutôt que rejeté.
+
+**`store_results` accepte maintenant `parse_fn`** (par défaut `parse_score`, Mortal Kombat) et
+n'écrit dans `round_results` que si le format analysé fournit `.rounds` (`getattr(parsed, "rounds",
+None)`) — absent pour `TableTennisScore`, qui a `.sets` à la place. Aucune table dédiée aux sets
+n'a été créée : pas demandé, et rien dans le produit actuel (Telegram, dashboards) n'en a besoin
+pour l'instant.
+
+**`scheduler.py`/`main.py`** : `Scheduler` reçoit désormais `league_sport_ids` (construit dans
+`main.py` à partir de `config/leagues.yaml`, déjà chargé avec un `sport_id` par ligue) et choisit
+le bon analyseur par ligue via une table `{103: parse_score, 10: parse_table_tennis_score}`, avec
+retour par défaut sur le parseur Mortal Kombat pour tout sport non listé (jamais de plantage sur
+un sport futur non encore géré).
+
+**Deuxième défaut trouvé, celui-ci dans les tests, pas dans le code de production** : trois tests
+de `test_telegram_feed.py` comparaient `config.chat_ids` par égalité stricte à un dictionnaire
+attendu, sans jamais nettoyer les vraies variables `TELEGRAM_MATCH_CHAT_ID_*` héritées du `.env`
+réel (le conteneur de tests charge `.env` en entier, voir `docker-compose.yml`). Invisible tant que
+`.env` ne contenait que les deux ligues Mortal Kombat ; devenu un échec net dès l'ajout des deux
+salons AI Table Tennis (Prague `-5491188051`, Goa `-5348408013`) à l'étape précédente. Corrigé par
+une fixture `autouse` qui neutralise toute variable réelle de ce préfixe avant chaque test du
+fichier — les tests contrôlent désormais entièrement leur environnement au lieu d'en hériter
+partiellement.
+
+**Résultat des tests** : 267 tests au total (+8 : 6 pour `parse_table_tennis_score`, 2 pour la
+généricité de `store_results`/`backfill_results`), confirmés sur deux exécutions indépendantes
+(la première ayant révélé le défaut d'isolation des tests Telegram ci-dessus, corrigé avant la
+seconde).
+
+**Vérifié en conditions réelles** (script ponctuel, supprimé après usage) : `backfill_results`
+lancé contre le vrai site pour les deux salles AI Table Tennis (`sport_id=10`, 2 jours d'historique)
+sur une base jetable. 266 résultats écrits pour Prague, 268 pour Goa, scores et vainqueurs cohérents
+avec le format attendu (ex. `"0:2 (9:11,6:11)"` → vainqueur 2), et confirmé zéro ligne dans
+`round_results` pour ces deux ligues (comportement attendu, ce format n'a pas de détail de round).
+
+**Décision de production toujours en attente, non revisitée ici** : les deux ligues AI Table Tennis
+restent absentes de `config/leagues.yaml`. Le parseur de résultats est maintenant prêt et vérifié,
+donc le blocage technique de l'étape 28 est levé — mais activer la collecte réelle en production
+(rattrapage historique complet, réconciliation périodique, fil Telegram en direct) reste une
+décision à valider explicitement avec l'utilisateur avant déploiement, pas quelque chose à faire
+silencieusement dans ce commit.

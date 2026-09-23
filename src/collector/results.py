@@ -7,6 +7,14 @@ alignés sur des multiples de 300 s, une fenêtre d'au plus 2 jours par requête
 Format du score, ex. Mortal Kombat X : ``5:0(1:0 F;1:0 R;1:0 R;1:0 R;1:0 F)``.
 Mortal Kombat 3 ajoute un suffixe Mercy à chaque round : ``5:3(0:1 F ,M- / M-; 1:0 Ba ,M- / M-; ...)``.
 Codes de finish observés : R, F, B, Ba, Fr, An, Hk (une ou deux lettres).
+
+Autre format rencontré, AI Table Tennis (Memoire.md, section 27) : ``2:0 (11:7,11:7)`` — score final
+en sets, puis score de chaque set entre parenthèses, séparés par des virgules (pas de type de
+finish, pas de suffixe Mercy — plus simple à analyser). Voir ``parse_table_tennis_score``.
+
+Le sport (``sport_id``) doit être passé explicitement à chaque appel plutôt que supposé : un vrai
+défaut a existé ici (``sportIds=103`` codé en dur, jamais paramétré tant qu'un seul sport était
+collecté) — corrigé avant qu'il ne cause un rattrapage silencieusement vide pour un autre sport.
 """
 from __future__ import annotations
 
@@ -102,6 +110,53 @@ def parse_score(raw: str) -> ParsedScore:
     return ParsedScore(final1, final2, winner=winner, rounds=rounds)
 
 
+_TT_SCORE_RE = re.compile(r"^(\d+):(\d+)\s*\((.*)\)$")
+_TT_SET_RE = re.compile(r"^(\d+):(\d+)$")
+
+
+@dataclass(frozen=True)
+class ParsedSet:
+    set_no: int
+    points1: int
+    points2: int
+    winner: int
+
+
+@dataclass(frozen=True)
+class TableTennisScore:
+    """Pendant de ``ParsedScore`` pour AI Table Tennis : pas de type de finish ni de Mercy, mais
+    le score point par point de chaque set (``sets``), une granularité que Mortal Kombat n'a pas
+    (Memoire.md, section 27). ``final1``/``final2``/``winner`` ont le même sens que pour
+    ``ParsedScore`` — les deux formes sont interchangeables pour ``store_results``."""
+    final1: int
+    final2: int
+    winner: int | None
+    sets: list[ParsedSet]
+
+
+def parse_table_tennis_score(raw: str) -> TableTennisScore:
+    """Analyse ``"2:0 (11:7,11:7)"``. Un set au format inattendu est ignoré (avec un
+    avertissement), pas fatal — même politique de tolérance que ``parse_score``."""
+    m = _TT_SCORE_RE.match(raw.strip())
+    if not m:
+        raise ResultParseError(f"format de score méconnaissable : {raw!r}")
+    final1, final2 = int(m.group(1)), int(m.group(2))
+    winner = 1 if final1 > final2 else (2 if final2 > final1 else None)
+
+    sets: list[ParsedSet] = []
+    for i, fragment in enumerate(m.group(3).split(","), start=1):
+        sm = _TT_SET_RE.match(fragment.strip())
+        if not sm:
+            log.warning("set %d illisible dans le score %r, ignoré", i, raw)
+            continue
+        p1, p2 = int(sm.group(1)), int(sm.group(2))
+        if p1 == p2:
+            log.warning("set %d à égalité (%r) dans le score %r, ignoré", i, fragment, raw)
+            continue
+        sets.append(ParsedSet(set_no=i, points1=p1, points2=p2, winner=1 if p1 > p2 else 2))
+    return TableTennisScore(final1, final2, winner=winner, sets=sets)
+
+
 def align_down(ts: datetime) -> datetime:
     """Arrondit un horodatage au multiple de 300 s inférieur (exigence du service de résultats)."""
     epoch = int(ts.timestamp())
@@ -122,9 +177,11 @@ def iter_windows(*, end: datetime, days_back: int) -> list[tuple[datetime, datet
 
 
 async def fetch_results(client: HttpClient, champ_id: int, date_from: datetime, date_to: datetime,
-                         site_params: dict[str, object]) -> list[RawResultGame]:
+                         site_params: dict[str, object], *, sport_id: int) -> list[RawResultGame]:
+    """``sport_id`` est obligatoire, jamais supposé : un défaut réel a existé ici (103 codé en dur,
+    jamais remarqué tant qu'un seul sport était collecté) — voir l'en-tête du module."""
     params = {"champId": champ_id, "dateFrom": int(date_from.timestamp()), "dateTo": int(date_to.timestamp()),
-              "sportIds": 103, **site_params}
+              "sportIds": sport_id, **site_params}
     result = await client.get(ENDPOINT, params)
     try:
         data = json.loads(result.body)
@@ -133,10 +190,17 @@ async def fetch_results(client: HttpClient, champ_id: int, date_from: datetime, 
         raise ParserError(f"réponse de résultats invalide : {exc}", endpoint=ENDPOINT, payload=result.body) from exc
 
 
-async def store_results(conn, league_id: int, games: list[RawResultGame]) -> int:
-    """Enregistre les résultats et le détail des rounds. Idempotent : un résultat déjà connu n'est
-    pas remplacé ; un round déjà décrit par le tableau des rounds en direct n'est que complété
-    (code de finish, Mercy), jamais écrasé (voir migrations/002 et storage/queries.py).
+async def store_results(conn, league_id: int, games: list[RawResultGame], *,
+                         parse_fn=parse_score) -> int:
+    """Enregistre les résultats et, si le format analysé les fournit (Mortal Kombat seulement à ce
+    jour — voir ``ParsedScore.rounds`` vs ``TableTennisScore.sets``), le détail des rounds.
+    Idempotent : un résultat déjà connu n'est pas remplacé ; un round déjà décrit par le tableau
+    des rounds en direct n'est que complété (code de finish, Mercy), jamais écrasé (voir
+    migrations/002 et storage/queries.py).
+
+    ``parse_fn`` rend cette fonction réutilisable pour n'importe quel format de score (passer
+    ``parse_table_tennis_score`` pour AI Table Tennis) sans dupliquer la boucle d'écriture ni la
+    logique de rattrapage (``backfill_results``/``reconcile_recent``, inchangées).
 
     Écritures groupées (``executemany``) : une fenêtre de 2 jours peut contenir plusieurs centaines
     de matchs (mesuré : jusqu'à environ 289 par jour et par ligue, Memoire.md section 2.2). Écrire
@@ -147,7 +211,7 @@ async def store_results(conn, league_id: int, games: list[RawResultGame]) -> int
     round_rows = []
     for game in games:
         try:
-            parsed = parse_score(game.score)
+            parsed = parse_fn(game.score)
         except ResultParseError as exc:
             log.error("résultat %s ignoré : %s", game.id, exc)
             continue
@@ -157,10 +221,12 @@ async def store_results(conn, league_id: int, games: list[RawResultGame]) -> int
             parsed.final1, parsed.final2, parsed.winner, game.score,
             datetime.fromtimestamp(game.dateStart, tz=timezone.utc), 3,
         ))
-        round_rows.extend(
-            (game.id, r.round_no, r.winner, None, None, r.finish_code, None, None, r.mercy_p1, r.mercy_p2)
-            for r in parsed.rounds
-        )
+        rounds = getattr(parsed, "rounds", None)  # absent pour TableTennisScore : pas de round_results
+        if rounds:
+            round_rows.extend(
+                (game.id, r.round_no, r.winner, None, None, r.finish_code, None, None, r.mercy_p1, r.mercy_p2)
+                for r in rounds
+            )
     if result_rows:
         await conn.executemany(queries.INSERT_RESULT, result_rows)
     if round_rows:
@@ -182,8 +248,8 @@ async def _set_backfill_state(conn, league_id: int, anchor: datetime, oldest_cov
 
 
 async def backfill_results(client: HttpClient, conn, league_id: int, site_params: dict[str, object],
-                            *, days_back: int, now: datetime | None = None,
-                            should_stop=lambda: False) -> int:
+                            *, sport_id: int, days_back: int, now: datetime | None = None,
+                            should_stop=lambda: False, parse_fn=parse_score) -> int:
     """Remonte l'historique des résultats fenêtre par fenêtre, en reprenant après une interruption
     grâce à un point de contrôle.
 
@@ -215,14 +281,15 @@ async def backfill_results(client: HttpClient, conn, league_id: int, site_params
     for window_start, window_end in windows:
         if should_stop():
             break  # arrêt demandé (redémarrage, blocage détecté ailleurs) : reprendra à ce point
-        games = await fetch_results(client, league_id, window_start, window_end, site_params)
-        n_total += await store_results(conn, league_id, games)
+        games = await fetch_results(client, league_id, window_start, window_end, site_params, sport_id=sport_id)
+        n_total += await store_results(conn, league_id, games, parse_fn=parse_fn)
         await _set_backfill_state(conn, league_id, anchor, window_start)
     return n_total
 
 
 async def reconcile_recent(client: HttpClient, conn, league_id: int, site_params: dict[str, object],
-                            *, lookback_hours: int = 2, now: datetime | None = None) -> int:
+                            *, sport_id: int, lookback_hours: int = 2, now: datetime | None = None,
+                            parse_fn=parse_score) -> int:
     """Récupère les résultats des dernières heures (par défaut 2 h, largement supérieur à la durée
     d'un match), pour capter les matchs terminés depuis le dernier passage.
 
@@ -233,5 +300,5 @@ async def reconcile_recent(client: HttpClient, conn, league_id: int, site_params
     now = now or datetime.now(timezone.utc)
     window_end = align_down(now) + timedelta(seconds=_ALIGN_SECONDS)
     window_start = align_down(now - timedelta(hours=lookback_hours))
-    games = await fetch_results(client, league_id, window_start, window_end, site_params)
-    return await store_results(conn, league_id, games)
+    games = await fetch_results(client, league_id, window_start, window_end, site_params, sport_id=sport_id)
+    return await store_results(conn, league_id, games, parse_fn=parse_fn)

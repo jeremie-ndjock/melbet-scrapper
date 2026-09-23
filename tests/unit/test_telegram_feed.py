@@ -3,12 +3,14 @@ message (demandé le 2026-09-22 : ligue, numéro et date du match, emojis par ty
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 import pytest
 
 from collector.sources.v3.statistic import RoundTableEntry
 from collector.telegram_feed import (
+    CHAT_ID_ENV_PREFIX,
     MatchFeedConfig,
     MatchFeedSender,
     format_match_message,
@@ -18,6 +20,15 @@ from collector.telegram_feed import (
 
 BOT_TOKEN = "123:abc"
 MKX, MK3 = 1252965, 2282406
+
+
+@pytest.fixture(autouse=True)
+def _clear_real_chat_id_env(monkeypatch):
+    """Le processus de test hérite du vrai .env (deux salons AI Table Tennis y sont configurés en
+    production) : sans ce nettoyage, ces variables fuiteraient dans les tests ci-dessous et
+    fausseraient leurs assertions d'égalité exacte sur ``config.chat_ids``."""
+    for key in [k for k in os.environ if k.startswith(CHAT_ID_ENV_PREFIX)]:
+        monkeypatch.delenv(key, raising=False)
 
 
 def _round(n, winner, seconds=31, finish="Regular", wt="0", fw=False) -> RoundTableEntry:

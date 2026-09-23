@@ -9,11 +9,12 @@ import httpx
 import pytest
 
 from collector.results import (RawResultGame, align_down, backfill_results, iter_windows,
-                                store_results)
+                                parse_table_tennis_score, store_results)
 from collector.transport.http import HttpClient, RetryConfig
 from collector.transport.ratelimit import RateLimiter
 
 MK_X = 1252965
+AI_TT = 3066896
 SITE_PARAMS = {"lng": "fr", "ref": 8}
 
 
@@ -50,6 +51,17 @@ async def test_store_results_skips_unparsable_score_without_failing_the_batch(db
     assert await db.fetchval("SELECT count(*) FROM results WHERE game_id = 4") == 1
 
 
+async def test_store_results_with_table_tennis_parser_skips_round_results(db):
+    """AI Table Tennis n'a pas de notion de finish-type : ``round_results`` (spécifique Mortal
+    Kombat) ne doit pas être renseignée, seul ``results`` doit l'être (Memoire.md, section 27)."""
+    tt_game = RawResultGame(id=5, champId=AI_TT, opp1="A", opp2="B", opp1Ids=[10], opp2Ids=[20],
+                             score="2:0 (11:7,11:7)", dateStart=1000)
+    n = await store_results(db, AI_TT, [tt_game], parse_fn=parse_table_tennis_score)
+    assert n == 1
+    assert await db.fetchval("SELECT count(*) FROM results WHERE game_id = 5") == 1
+    assert await db.fetchval("SELECT count(*) FROM round_results WHERE game_id = 5") == 0
+
+
 def _mock_client(handler, *, retry: RetryConfig | None = None):
     transport = httpx.MockTransport(handler)
     inner = httpx.AsyncClient(transport=transport, base_url="https://melbet.test")
@@ -76,7 +88,7 @@ async def test_backfill_queries_expected_number_of_windows_and_stores_results(db
         ]))
 
     client = _mock_client(handler)
-    n_stored = await backfill_results(client, db, MK_X, SITE_PARAMS, days_back=5, now=now)
+    n_stored = await backfill_results(client, db, MK_X, SITE_PARAMS, sport_id=103, days_back=5, now=now)
 
     expected_windows = iter_windows(end=now, days_back=5)
     assert len(requested_windows) == len(expected_windows)
@@ -102,12 +114,12 @@ async def test_backfill_resumes_without_requerying_done_windows(db):
 
     client = _mock_client(handler)
 
-    await backfill_results(client, db, MK_X, SITE_PARAMS, days_back=7, now=now)
+    await backfill_results(client, db, MK_X, SITE_PARAMS, sport_id=103, days_back=7, now=now)
     n_after_first = len(all_requested)
     assert n_after_first == len(iter_windows(end=now, days_back=7)) > 1
 
     # Reprise (horloge murale différente, ex. redémarrage du conteneur le lendemain), même profondeur.
-    await backfill_results(client, db, MK_X, SITE_PARAMS, days_back=7, now=now + timedelta(hours=30))
+    await backfill_results(client, db, MK_X, SITE_PARAMS, sport_id=103, days_back=7, now=now + timedelta(hours=30))
 
     assert len(all_requested) == n_after_first  # tout était déjà couvert : aucune requête de plus
     as_datetimes = {(datetime.fromtimestamp(a, tz=timezone.utc), datetime.fromtimestamp(b, tz=timezone.utc))
@@ -130,8 +142,8 @@ async def test_reconcile_recent_covers_a_short_lookback_window_and_is_safe_to_re
     client = _mock_client(handler)
     from collector.results import reconcile_recent
 
-    n1 = await reconcile_recent(client, db, MK_X, SITE_PARAMS, lookback_hours=2, now=now)
-    n2 = await reconcile_recent(client, db, MK_X, SITE_PARAMS, lookback_hours=2, now=now)  # appelé de nouveau, sans dégât
+    n1 = await reconcile_recent(client, db, MK_X, SITE_PARAMS, sport_id=103, lookback_hours=2, now=now)
+    n2 = await reconcile_recent(client, db, MK_X, SITE_PARAMS, sport_id=103, lookback_hours=2, now=now)  # appelé de nouveau, sans dégât
     assert n1 == 1 and n2 == 1
     assert await db.fetchval("SELECT count(*) FROM results") == 1  # store_results reste idempotent
     date_from, date_to = calls[0]
@@ -158,7 +170,7 @@ async def test_backfill_resumes_after_a_mid_run_crash(db):
 
     client = _mock_client(flaky_handler)
     with pytest.raises(Exception):
-        await backfill_results(client, db, MK_X, SITE_PARAMS, days_back=7, now=now)
+        await backfill_results(client, db, MK_X, SITE_PARAMS, sport_id=103, days_back=7, now=now)
     n_before_crash = len(requested)
     assert 0 < n_before_crash < len(iter_windows(end=now, days_back=7))  # interrompu en cours de route
 
@@ -169,7 +181,7 @@ async def test_backfill_resumes_after_a_mid_run_crash(db):
         return httpx.Response(200, text=_window_body([]))
 
     client2 = _mock_client(reliable_handler)
-    await backfill_results(client2, db, MK_X, SITE_PARAMS, days_back=7, now=now)
+    await backfill_results(client2, db, MK_X, SITE_PARAMS, sport_id=103, days_back=7, now=now)
 
     total_windows = len(iter_windows(end=now, days_back=7))
     # La fenêtre qui a échoué juste avant le crash est légitimement redemandée après la reprise
@@ -189,7 +201,31 @@ async def test_backfill_with_no_new_range_makes_no_request(db):
         return httpx.Response(200, text=_window_body([]))
 
     client = _mock_client(handler)
-    await backfill_results(client, db, MK_X, SITE_PARAMS, days_back=3, now=now)
+    await backfill_results(client, db, MK_X, SITE_PARAMS, sport_id=103, days_back=3, now=now)
     n_first = calls["n"]
-    await backfill_results(client, db, MK_X, SITE_PARAMS, days_back=3, now=now)  # rien de nouveau à couvrir
+    await backfill_results(client, db, MK_X, SITE_PARAMS, sport_id=103, days_back=3, now=now)  # rien de nouveau à couvrir
     assert calls["n"] == n_first  # aucun appel supplémentaire
+
+
+async def test_backfill_sends_the_given_sport_id_and_uses_the_given_parser(db):
+    """Régression pour le bug réel trouvé en généralisant results.py : ``sportIds`` était figé à
+    103 (Mortal Kombat) quel que soit le sport demandé (Memoire.md, section 27)."""
+    now = datetime(2026, 9, 21, 12, 0, 0, tzinfo=timezone.utc)
+    sent_sport_ids: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        q = parse_qs(request.url.query.decode())
+        sent_sport_ids.append(int(q["sportIds"][0]))
+        return httpx.Response(200, text=_window_body([
+            {"id": 999, "champId": AI_TT, "opp1": "A", "opp2": "B", "opp1Ids": [1], "opp2Ids": [2],
+             "score": "2:0 (11:7,11:7)", "dateStart": int(now.timestamp())}
+        ]))
+
+    client = _mock_client(handler)
+    n_stored = await backfill_results(client, db, AI_TT, SITE_PARAMS, sport_id=10, days_back=1, now=now,
+                                       parse_fn=parse_table_tennis_score)
+
+    assert n_stored == len(iter_windows(end=now, days_back=1))
+    assert all(sid == 10 for sid in sent_sport_ids)  # jamais le 103 par défaut de Mortal Kombat
+    assert await db.fetchval("SELECT count(*) FROM results WHERE game_id = 999") == 1
+    assert await db.fetchval("SELECT count(*) FROM round_results WHERE game_id = 999") == 0

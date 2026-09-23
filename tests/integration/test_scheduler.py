@@ -134,9 +134,11 @@ class FakeAlerter:
 
 def make_scheduler(db_pool, melbet: FakeMelbet, cdn: FakeCdn, *, leagues=None, queue_maxsize=100,
                     recovery_probe_cycles=12, alerter=None, live_feed=None) -> Scheduler:
+    leagues = leagues or LEAGUES
     return Scheduler(
         http=make_http(melbet.handler), cdn_http=make_http(cdn.handler), db_pool=db_pool,
-        leagues=leagues or LEAGUES, site_params=SITE_PARAMS, legacy_site_params=SITE_PARAMS,
+        leagues=leagues, league_sport_ids={league_id: 103 for league_id in leagues},
+        site_params=SITE_PARAMS, legacy_site_params=SITE_PARAMS,
         poll_interval=5.0, queue_maxsize=queue_maxsize, recovery_probe_cycles=recovery_probe_cycles,
         alerter=alerter, live_feed=live_feed,
     )

@@ -42,7 +42,7 @@ from .live_feed import LiveFeedProcessor
 from .observability import metrics
 from .pipeline import CycleResult, preload_from_db, process_cycle
 from .pre_match import PreMatchAnnouncer
-from .results import backfill_results, reconcile_recent
+from .results import backfill_results, parse_score, parse_table_tennis_score, reconcile_recent
 from .sources.legacy.client import fetch_games_by_champ_legacy
 from .sources.v3.client import fetch_games_by_champ
 from .sources.v3.models import GamesByChampResponse
@@ -55,6 +55,13 @@ from .transport.http import HttpClient
 DEFAULT_RECOVERY_PROBE_CYCLES = 12  # ~1 min à un cycle de 5 s
 # Taille maximale du payload conservé en lettre morte (les réponses les plus grosses sont tronquées).
 DEAD_LETTER_PAYLOAD_LIMIT = 20_000
+
+# Format de score des résultats officiels, selon le sport (voir results.py). 103 = Mortal Kombat
+# (toutes variantes) ; 10 = tennis de table (AI Table Tennis). Un sport absent de cette table
+# retombe sur le format Mortal Kombat plutôt que de lever une erreur — le pire cas est un
+# rattrapage qui échoue proprement (journalisé, non fatal), jamais un plantage.
+_RESULT_PARSER_BY_SPORT = {103: parse_score, 10: parse_table_tennis_score}
+_DEFAULT_RESULT_PARSER = parse_score
 
 log = logging.getLogger("collector.scheduler")
 
@@ -89,6 +96,7 @@ class Scheduler:
         cdn_http: HttpClient,
         db_pool: asyncpg.Pool,
         leagues: dict[int, str],
+        league_sport_ids: dict[int, int],
         site_params: dict[str, object],
         legacy_site_params: dict[str, object],
         poll_interval: float,
@@ -102,6 +110,7 @@ class Scheduler:
         self.cdn_http = cdn_http
         self.db_pool = db_pool
         self.leagues = leagues
+        self.league_sport_ids = league_sport_ids
         self.site_params = site_params
         self.legacy_site_params = legacy_site_params
         self.poll_interval = poll_interval
@@ -348,14 +357,22 @@ class Scheduler:
             )
             return 0
 
+    def _result_parser_for(self, league_id: int):
+        sport_id = self.league_sport_ids.get(league_id)
+        return _RESULT_PARSER_BY_SPORT.get(sport_id, _DEFAULT_RESULT_PARSER)
+
     async def reconcile_results_once(self) -> int:
         total = 0
         for league_id in self.leagues:
             if self.stopping:
                 break
+            sport_id = self.league_sport_ids.get(league_id, 103)
             try:
                 async with self.db_pool.acquire() as conn:
-                    total += await reconcile_recent(self.http, conn, league_id, self.site_params)
+                    total += await reconcile_recent(
+                        self.http, conn, league_id, self.site_params,
+                        sport_id=sport_id, parse_fn=self._result_parser_for(league_id),
+                    )
             except BlockedError as exc:
                 await self._stop_if_blocked(exc, context=f"réconciliation des résultats, ligue {league_id}")
                 return total
@@ -366,11 +383,14 @@ class Scheduler:
         for league_id in self.leagues:
             if self.stopping:
                 break
+            sport_id = self.league_sport_ids.get(league_id, 103)
             try:
                 async with self.db_pool.acquire() as conn:
                     total += await backfill_results(
-                        self.http, conn, league_id, self.site_params, days_back=days_back,
+                        self.http, conn, league_id, self.site_params,
+                        sport_id=sport_id, days_back=days_back,
                         should_stop=lambda: self.stopping,  # arrêt réactif entre deux fenêtres
+                        parse_fn=self._result_parser_for(league_id),
                     )
             except BlockedError as exc:
                 await self._stop_if_blocked(exc, context=f"rattrapage des résultats, ligue {league_id}")
