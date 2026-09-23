@@ -1678,3 +1678,43 @@ jamais le cas pour Mortal Kombat). Un des deux matchs est même allé jusqu'à `
 (2 sets, score 2-0) : le message d'annonce du vainqueur a donc réellement été envoyé sur Telegram,
 confirmé par les journaux du conteneur (`POST .../sendMessage` et `.../editMessageText`, tous deux
 `200 OK`, aux horodatages correspondant exactement aux mises à jour de `match_feed`).
+
+## 32. Vrai défaut de production trouvé : bascules répétées sur la source de secours pour AI Table Tennis (2026-09-23)
+
+Signalé par l'utilisateur (après confirmation de la bonne réception des messages Telegram) : de
+nombreuses alertes « ⚠️ Source de secours activée » sur les deux ligues AI Table Tennis. Diagnostic
+mené en SSH direct sur le VPS (accès temporairement coupé en cours de route par le groupe de
+sécurité AWS — IP publique de la session de travail différente de celle déjà autorisée ; résolu en
+ajoutant une règle entrante SSH `/32` pour la nouvelle IP, même procédure que le runbook §3).
+
+Les journaux réels ont montré la cause précise, en corrélant l'horodatage de l'alerte avec la
+requête HTTP juste avant :
+
+```
+GET .../v3/gamesByChamp?...champId=3066897... "HTTP/1.1 204 No Content"
+structure inattendue de la source principale (JSON invalide : Expecting value: line 1 column 1 (char 0))
+```
+
+Un `204 No Content` (corps vide) signifie qu'aucun match n'est actuellement en cours ni programmé
+pour cette ligue à cet instant précis — **jamais rencontré avec Mortal Kombat** (toujours un match
+en file d'attente) mais fréquent avec AI Table Tennis, dont les « salles » ont apparemment un court
+instant sans match entre deux rencontres. Le code traitait ce corps vide comme un JSON invalide
+(`json.loads("")` échoue), donc comme une vraie panne de schéma : bascule inutile sur la source de
+secours, qui ne gère d'ailleurs pas du tout ce sport (conçue uniquement pour Mortal Kombat) — d'où
+le flottement observé (bascule, rétablissement quelques cycles plus tard, à répétition, plusieurs
+fois par heure sur chaque salle).
+
+**Corrigé dans `sources/v3/client.py`** : `fetch_games_by_champ` traite désormais un `204` comme
+zéro match (`GamesByChampResponse(gamesCount=0, games=[])`), sans jamais tenter de décoder un corps
+vide ni déclencher de bascule — un état normal, pas une erreur. Aucun autre code n'est affecté :
+`.liga` (nécessairement reconstruit avec un nom vide dans ce cas précis) n'est lu nulle part
+ailleurs dans le code, vérifié explicitement avant de coder le correctif.
+
+**Résultat des tests** : 281 tests (+3 : `fetch_games_by_champ` avec un vrai 204 mocké, avec une
+réponse 200 normale pour non-régression, et un test d'intégration confirmant qu'un 204 ne déclenche
+ni bascule ni appel à la source de secours), deux exécutions indépendantes stables.
+
+**Déployé et vérifié en conditions réelles sur le VPS** : `git pull`, image reconstruite, conteneur
+recréé. À confirmer par l'utilisateur sur la durée : plus aucune alerte de bascule intempestive
+pour les deux ligues AI Table Tennis (une vraie panne de schéma, elle, doit continuer à en
+déclencher une — le comportement pour Mortal Kombat est inchangé).

@@ -57,6 +57,9 @@ class FakeMelbet:
         # Simule un changement de structure du site : gamesByChamp renvoie un JSON qui ne valide
         # plus le schéma attendu (comme si un champ requis avait disparu ou changé de forme).
         self.v3_schema_broken = False
+        # Simule l'absence de match en ce moment pour une ligue (204 No Content), un état normal
+        # rencontré avec AI Table Tennis (Memoire.md, section 32) — pas une erreur de schéma.
+        self.no_games_204: set[int] = set()
         # Score courant par ligue (0-0 par défaut) et tableau des rounds pour /v3/statistic,
         # utilisés par les tests du fil de match en direct (voir test_live_feed_*).
         self.score: dict[int, tuple[int, int]] = {}
@@ -86,6 +89,8 @@ class FakeMelbet:
         if "gamesByChamp" in request.url.path:
             champ_id = int(q["champId"][0])
             self.games_calls.append(champ_id)
+            if champ_id in self.no_games_204:
+                return httpx.Response(204)
             if self.v3_schema_broken:
                 # Un champ requis (`id`) a disparu : la validation de schéma doit échouer.
                 body = {"liga": {"id": champ_id, "name": "x"}, "gamesCount": 1,
@@ -296,6 +301,23 @@ async def test_recovers_from_degraded_state_once_the_schema_is_fixed(db_pool):
 
     assert MK_X not in sched._degraded
     assert len(melbet.games_calls) == v3_calls_before + 1
+
+
+async def test_no_games_currently_204_does_not_trigger_a_fallback(db_pool):
+    """Régression du vrai défaut de production trouvé le 2026-09-23 (Memoire.md, section 32) :
+    un 204 No Content (aucun match en ce moment, arrivé avec AI Table Tennis) déclenchait à tort
+    une bascule sur la source de secours — jamais rencontré avec Mortal Kombat auparavant."""
+    melbet = FakeMelbet()
+    melbet.no_games_204.add(MK_X)
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "x"})
+
+    assert await sched.poll_once(MK_X) is True
+    assert MK_X not in sched._degraded
+    assert sched.metrics.schema_changes_detected == 0
+    assert melbet.legacy_calls == []  # jamais appelée : pas une panne, rien à contourner
+
+    result = await sched.write_once()
+    assert result is not None and result.n_games == 0
 
 
 async def test_both_sources_failing_is_reported_but_does_not_stop_the_scheduler(db_pool):
