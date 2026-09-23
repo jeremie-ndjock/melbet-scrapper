@@ -1669,6 +1669,12 @@ et un test de non-régression confirmant qu'une ligue sans correspondance de spo
 comportement Mortal Kombat par défaut), deux exécutions indépendantes stables.
 
 **Déployé et vérifié en conditions réelles sur le VPS** (accès SSH toujours actif pour cette
-session) : `git pull`, image reconstruite, conteneur `scraper` recréé. Reste à confirmer par
-l'utilisateur : réception effective d'un message dans les deux salons Telegram AI Table Tennis lors
-de la prochaine manche terminée en direct.
+session) : `git pull`, image reconstruite, conteneur `scraper` recréé, `healthy`. Confirmé
+directement en base réelle quelques minutes plus tard, sur deux vrais matchs en cours (un par
+salon) : `match_feed` contient bien une ligne pour chacun des deux salons (`-5491188051` Prague,
+`-5348408013` Goa) avec `last_round_notified` > 0, et `round_results` est rempli avec la signature
+attendue du nouveau chemin (`winner` déjà un index numérique, `seconds`/`finish_di` à `NULL` —
+jamais le cas pour Mortal Kombat). Un des deux matchs est même allé jusqu'à `match_finished = true`
+(2 sets, score 2-0) : le message d'annonce du vainqueur a donc réellement été envoyé sur Telegram,
+confirmé par les journaux du conteneur (`POST .../sendMessage` et `.../editMessageText`, tous deux
+`200 OK`, aux horodatages correspondant exactement aux mises à jour de `match_feed`).
