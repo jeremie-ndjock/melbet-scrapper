@@ -9,9 +9,12 @@ import yaml
 from collector.config import load_leagues, load_settings
 
 
-def test_leagues_yaml_contains_the_two_validated_leagues():
+def test_leagues_yaml_contains_the_four_validated_leagues():
     leagues = {league.id: league.name for league in load_leagues()}
-    assert leagues == {1252965: "Mortal Kombat X", 2282406: "Mortal Kombat 3"}
+    assert leagues == {
+        1252965: "Mortal Kombat X", 2282406: "Mortal Kombat 3",
+        3066896: "AI Table Tennis Prague", 3066897: "AI Table Tennis Goa",
+    }
 
 
 def test_settings_yaml_has_required_transport_fields():

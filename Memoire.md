@@ -1586,3 +1586,29 @@ donc le blocage technique de l'étape 28 est levé — mais activer la collecte 
 (rattrapage historique complet, réconciliation périodique, fil Telegram en direct) reste une
 décision à valider explicitement avec l'utilisateur avant déploiement, pas quelque chose à faire
 silencieusement dans ce commit.
+
+## 30. Activation en production des deux ligues AI Table Tennis (2026-09-23)
+
+Décision explicitement confirmée par l'utilisateur : les deux salles AI Table Tennis (Prague
+`3066896`, Goa `3066897`, `sport_id: 10`) sont ajoutées à `config/leagues.yaml`. À partir du
+prochain déploiement, le collecteur de production va, pour ces deux ligues comme pour les deux
+ligues Mortal Kombat existantes : collecter les cotes en continu, rattraper l'historique des
+résultats, réconcilier périodiquement, et publier le fil de match en direct sur les deux salons
+Telegram dédiés déjà configurés (`.env` : `TELEGRAM_MATCH_CHAT_ID_3066896`,
+`TELEGRAM_MATCH_CHAT_ID_3066897`).
+
+**Un test à corriger, pas un vrai défaut** : `test_leagues_yaml_contains_the_two_validated_leagues`
+vérifiait par égalité stricte que seules les deux ligues Mortal Kombat étaient chargées — mis à jour
+(renommé `..._the_four_validated_leagues`) pour refléter la nouvelle configuration attendue.
+
+**Résultat des tests** : 267 tests, deux exécutions indépendantes stables après correction du test
+de configuration ci-dessus.
+
+**Pas de nouvelle vérification en conditions réelles pour cette étape** : le parseur et la
+machinerie de rattrapage/réconciliation ont déjà été vérifiés contre le vrai site à l'étape 29 (266
+résultats Prague, 268 Goa, écrits correctement). Ce commit ne change que la configuration qui
+détermine quelles ligues sont scrutées en continu — aucun code de collecte n'est modifié.
+
+**Reste à faire, hors de ce dépôt** : déployer ce changement sur le VPS de production (`git pull` +
+redémarrage du service `scraper`) pour que l'activation prenne effet réellement en continu — étape
+manuelle, à confirmer séparément avec l'utilisateur avant de la déclencher.

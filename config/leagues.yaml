@@ -2,11 +2,10 @@
 # ne suffit pas : la ligne correspondante doit aussi exister dans la table `leagues` de la base
 # (contrainte de clé étrangère), ET son format de résultats doit être géré par results.py — sans
 # quoi le rattrapage/la réconciliation échoueraient en boucle (silencieusement journalisés, pas
-# fatals, mais inutiles) pour chaque match. AI Table Tennis (Memoire.md, section 27/28) a un
-# format de score différent ("2:0 (11:7,11:7)", pas encore géré) : ses deux salles ont leur ligne
-# dans `leagues` (migration 010) et leur normalisation des cotes est prête et testée, mais elles ne
-# sont volontairement PAS listées ici tant que ce parseur n'existe pas — les ajouter maintenant
-# activerait un rattrapage de résultats voué à échouer sur chaque match, en production.
+# fatals, mais inutiles) pour chaque match. AI Table Tennis (Memoire.md, section 27/28/29) a un
+# format de score différent ("2:0 (11:7,11:7)") : son parseur (parse_table_tennis_score) est
+# maintenant écrit, testé et vérifié en conditions réelles (Memoire.md §29) — ses deux salles sont
+# donc activées ci-dessous, avec leurs deux salons Telegram dédiés (voir .env, Prague/Goa).
 leagues:
   - id: 1252965
     name: Mortal Kombat X
@@ -14,3 +13,9 @@ leagues:
   - id: 2282406
     name: Mortal Kombat 3
     sport_id: 103
+  - id: 3066896
+    name: AI Table Tennis Prague
+    sport_id: 10
+  - id: 3066897
+    name: AI Table Tennis Goa
+    sport_id: 10
