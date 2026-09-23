@@ -254,6 +254,26 @@ async def test_run_stops_promptly_on_explicit_stop_request(db_pool):
     assert sched.metrics.cycles >= 1  # au moins un cycle a bien eu lieu avant l'arrêt
 
 
+async def test_degraded_and_recovered_alerts_include_the_league_name(db_pool):
+    """Demandé le 2026-09-23 après une alerte réelle peu lisible (juste un identifiant numérique) :
+    le sujet et le message doivent nommer la ligue, pas seulement son identifiant."""
+    melbet = FakeMelbet()
+    melbet.v3_schema_broken = True
+    alerter = FakeAlerter()
+    sched = make_scheduler(db_pool, melbet, FakeCdn(), leagues={MK_X: "Mortal Kombat X"},
+                            recovery_probe_cycles=1, alerter=alerter)
+
+    await sched.poll_once(MK_X)
+    degraded_subject = alerter.calls[0][1]
+    assert degraded_subject == "⚠️ Source de secours activée (Mortal Kombat X (1252965))"
+    assert "Mortal Kombat X (1252965)" in alerter.calls[0][2]
+
+    melbet.v3_schema_broken = False
+    await sched.poll_once(MK_X)  # probe immédiate (recovery_probe_cycles=1) : rétablissement
+    recovered_subject = alerter.calls[-1][1]
+    assert recovered_subject == "✅ Source principale rétablie (Mortal Kombat X (1252965))"
+
+
 async def test_schema_change_falls_back_to_legacy_and_records_dead_letter(db_pool):
     """Simule un changement de structure du site (un champ requis disparaît de la réponse) :
     le cycle ne doit pas être perdu, la réponse brute doit être archivée, et les cycles suivants

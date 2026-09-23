@@ -1715,6 +1715,14 @@ réponse 200 normale pour non-régression, et un test d'intégration confirmant 
 ni bascule ni appel à la source de secours), deux exécutions indépendantes stables.
 
 **Déployé et vérifié en conditions réelles sur le VPS** : `git pull`, image reconstruite, conteneur
-recréé. À confirmer par l'utilisateur sur la durée : plus aucune alerte de bascule intempestive
-pour les deux ligues AI Table Tennis (une vraie panne de schéma, elle, doit continuer à en
-déclencher une — le comportement pour Mortal Kombat est inchangé).
+recréé, `healthy` depuis 19:44 UTC. Confirmé : aucune alerte de bascule intempestive dans les
+journaux depuis le redémarrage (auparavant plusieurs par heure sur chaque salle). L'utilisateur a
+d'abord cru le défaut toujours présent en voyant d'anciennes alertes dans Telegram — écart
+d'horaire entre l'heure locale affichée par Telegram et l'heure serveur (UTC) : les alertes
+montrées dataient bien d'avant le redéploiement.
+
+**Complément demandé dans la foulée** : les alertes de bascule ne montraient qu'un identifiant
+numérique de ligue (« ligue 3066896 »), peu lisible sans ouvrir `config/leagues.yaml`. Ajout de
+`Scheduler._league_label` (« Nom (identifiant) ») utilisé dans les deux alertes concernées
+(activation et rétablissement de la source de secours). 282 tests (+1), deux exécutions
+indépendantes stables. Déployé sur le VPS.

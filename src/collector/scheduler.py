@@ -198,6 +198,13 @@ class Scheduler:
                                         ok=False, error=str(exc))
             return None
 
+    def _league_label(self, league_id: int) -> str:
+        """Nom lisible d'une ligue pour les alertes (ex. « AI Table Tennis Prague (3066896) ») :
+        un identifiant seul oblige à aller chercher `config/leagues.yaml` pour savoir de quoi il
+        s'agit — demandé le 2026-09-23 après une alerte réelle sur une ligue AI Table Tennis."""
+        name = self.leagues.get(league_id)
+        return f"{name} ({league_id})" if name else str(league_id)
+
     async def _mark_degraded(self, league_id: int, exc: ParserError) -> None:
         metrics.parser_errors_total.labels(source="melbet", league=str(league_id)).inc()
         already_degraded = league_id in self._degraded
@@ -214,9 +221,10 @@ class Scheduler:
             )
             self.metrics.schema_changes_detected += 1
             metrics.schema_changes_total.labels(league=str(league_id)).inc()
+            label = self._league_label(league_id)
             await self._send_alert(
-                f"degraded:{league_id}", f"⚠️ Source de secours activée (ligue {league_id})",
-                f"La source principale ne correspond plus au schéma attendu pour la ligue {league_id} : "
+                f"degraded:{league_id}", f"⚠️ Source de secours activée ({label})",
+                f"La source principale ne correspond plus au schéma attendu pour la ligue {label} : "
                 f"{exc}\nLa collecte continue via la source de secours (plus lente). "
                 f"Un nouvel essai automatique aura lieu dans environ {self.recovery_probe_cycles} cycles.",
             )
@@ -269,9 +277,10 @@ class Scheduler:
                     self._degraded.discard(league_id)
                     if self.alerter is not None:
                         self.alerter.reset(f"degraded:{league_id}")  # une rechute sera signalée sans délai
+                    label = self._league_label(league_id)
                     await self._send_alert(
-                        f"recovered:{league_id}", f"✅ Source principale rétablie (ligue {league_id})",
-                        f"La ligue {league_id} n'utilise plus la source de secours : le site répond de "
+                        f"recovered:{league_id}", f"✅ Source principale rétablie ({label})",
+                        f"La ligue {label} n'utilise plus la source de secours : le site répond de "
                         "nouveau au format attendu.",
                     )
         else:
