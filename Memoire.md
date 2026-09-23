@@ -1778,3 +1778,50 @@ de réconciliation) avant de décider quoi que ce soit sur la production.
 
 **Statut** : en attente de la création de l'instance côté utilisateur (console AWS) avant de
 poursuivre le déploiement.
+
+## 34. Clôture de session — 2026-09-23 (suite)
+
+**Fait aujourd'hui** (sections 29 à 33 pour le détail complet) :
+- **Résultats AI Table Tennis** : `results.py` généralisé par sport (un vrai défaut corrigé au
+  passage : `sportIds=103` codé en dur), nouveau parseur `parse_table_tennis_score`. Commit
+  `20dbd61`.
+- **Activation en production** des deux ligues AI Table Tennis (Prague, Goa) dans
+  `config/leagues.yaml`, décision confirmée explicitement par l'utilisateur, déployée et vérifiée
+  sur le VPS (accès SSH fourni pour l'occasion). Commits `97f260b`, `7511d36`.
+- **Deux vrais défauts de production trouvés et corrigés le jour même**, tous deux signalés par
+  l'utilisateur après déploiement :
+  - Le fil de match Telegram restait muet sur AI Table Tennis (`statistic.main.RoundTable`
+    n'existe pas pour ce sport ; `periodScores` généralisé sur le même principe que `results.py`).
+    Commits `b060504`, `8010613`.
+  - Bascules répétées sur la source de secours (un `204 No Content`, normal pour ce sport, était
+    pris pour une panne de schéma). Commit `d86b6f5`.
+  - Complément : nom de ligue ajouté aux alertes de bascule (`d9c62d3`).
+- **281 → 282 tests au total** au fil de la session, deux exécutions indépendantes à chaque étape,
+  toujours vérifié en conditions réelles (VPS, vraies données, vrais salons Telegram) avant de
+  considérer une étape close.
+- **Incident opérationnel résolu** : accès SSH au VPS coupé en cours de session (groupe de sécurité
+  restreint à une IP différente de celle de la session de travail) — diagnostiqué, corrigé par
+  l'utilisateur dans la console AWS (règle `/32` ajoutée), reconnecté sans perte de travail.
+- **Question posée par l'utilisateur, non exécutée** : passage à un VPS gratuit (`t3.micro`).
+  Usage réel mesuré (~580 Mo sur 8 Go), risques identifiés (pas de swap, instance burstable, pas
+  d'IP Elastic → changement d'IP au redémarrage). Décision : rester sur `m7i-flex.large`, tester
+  d'abord sur une instance séparée avant toute migration réelle (section 33, plan prêt, pas encore
+  lancé).
+- **Question posée par l'utilisateur sur l'entraînement des modèles prédictifs** (plan de l'étape
+  24) : vérifié en base réelle plutôt que supposé — 345/343 matchs, ~2500 manches par ligue après
+  seulement ~1,2 jour de collecte continue, mais Hara-Kiri (MK3) à seulement 4 exemples. Décision
+  de l'utilisateur : attendre le J+3 recommandé par le plan (encore ~2 jours) avant de lancer
+  l'extraction ETL et le premier modèle baseline.
+
+**État en fin de session** : le collecteur tourne en production réelle sur le VPS avec **quatre**
+ligues actives (Mortal Kombat X, Mortal Kombat 3, AI Table Tennis Prague, AI Table Tennis Goa) —
+cotes, résultats, réconciliation, fil de match Telegram en direct et alertes lisibles, tous
+vérifiés en conditions réelles sur chacune. Aucune alerte intempestive depuis les derniers
+correctifs, confirmé par l'utilisateur.
+
+**Points restés ouverts, à reprendre plus tard** :
+- Instance `t3.micro` de test (section 33) : plan prêt, pas encore créée.
+- Entraînement des modèles prédictifs : attendre J+3 (≈2026-09-25), puis lancer l'extraction ETL
+  du plan (`docs/forecasting/plan_entrainement_mortal_kombat.docx`, section 6).
+- IP Elastic toujours non allouée sur le VPS ; alerte de budget AWS toujours non confirmée comme
+  configurée (reportés depuis les clôtures précédentes, jamais retranchés ni traités).
