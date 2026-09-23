@@ -1414,11 +1414,68 @@ Mortal Kombat (570/24h sur 2 ligues) mais avec une granularité par set potentie
 que Mortal Kombat par manche, sur un sport dont le forecasting est un domaine mature (tennis de
 table : probabilité de gain par point, modèles déjà publiés dans la littérature sportive).
 
-**État à la fin de cette reconnaissance initiale** : suffisant pour confirmer que c'est un
-candidat sérieux (infrastructure connue, score propre, cadence correcte), mais **pas encore assez
-pour coder un collecteur** — reste à faire, dans le même esprit que la reconnaissance Mortal
-Kombat originale (section 2 et suivantes) : décodage complet des groupes de marchés via le
-dictionnaire CDN, capture d'un match complet pour confirmer l'absence de piège (ex. l'égalité
-2:2 trouvée en plein développement pour Mortal Kombat 3), et une vérification que les probabilités
-simulées corrèlent bien avec un classement réel avant d'investir dans des variables « identité du
-joueur ».
+**Reconnaissance approfondie complétée le même jour** (dictionnaire décodé, enregistrement complet
+d'un match, vérification de la piste des classements réels) :
+
+### Dictionnaire des marchés (décodé via le CDN officiel, même méthode que Mortal Kombat)
+
+Bien plus riche que Mortal Kombat (9 groupes) : **12 groupes distincts** trouvés sur un seul match,
+au niveau du match entier ET par set (`subGamesForMainGame`) :
+
+| `G` | Libellé officiel | Niveau |
+|---|---|---|
+| 1 | 1x2 (vainqueur du match) | Match entier |
+| 17 | Total (points du set) | Match entier + par set |
+| 2 | Handicap | Par set |
+| 14 | Pair/Impair (total de points) | Par set |
+| 15 | Total 1 (points du joueur 1) | Par set |
+| 62 | Total 2 (points du joueur 2) | Par set |
+| 60 | Premier à avoir (N points) | Par set |
+| 136 | Score exact | Par set |
+| 145 | Points supplémentaires | Par set |
+| 1144 | Différence exacte de points | Par set |
+| 2492 | Un des adversaires gagnera par (marge) | Par set |
+| 10464 | Nombre exact de points dans le set | Par set |
+
+Même quirk que Mortal Kombat retrouvé à l'identique : les groupes 14, 15, 17, 62 vivent réellement
+dans le chunk 0 du dictionnaire malgré une table d'intervalles qui pointe vers le chunk 2 — le
+repli chunk 0 déjà implémenté dans `dictionary.py` fonctionnerait donc tel quel.
+
+### Enregistrement complet d'un match réel (24 min, ~5 s/relevé, deux salles en parallèle)
+
+- **Granularité point par point confirmée en direct** : `scores.periodScores[].scoreOpp1/2` se met
+  à jour à chaque point marqué (relevé toutes les ~7 à 15 s), pas seulement au changement de set —
+  **plus fin que Mortal Kombat**, qui n'expose la progression qu'au niveau de la manche entière.
+  Un match complet capturé (Dang Qiu vs Yan Wang, victoire 2-0) : set 1 terminé 12-10, set 2 terminé
+  18-16 (prolongation au-delà de 11 points confirmée — la règle des 2 points d'écart après 10-10
+  est bien implémentée par le simulateur), durée totale du match ≈ 10 min 14 s.
+- **Défaut réel observé, à traiter dans un futur collecteur** : une coupure d'environ 3 minutes où
+  les deux salles simultanément ont renvoyé un corps de réponse vide (`JSONDecodeError`) après la
+  fin de deux matchs. Simultané sur les deux salles → plutôt un incident ponctuel côté site qu'un
+  comportement systématique de transition de match ; à confirmer sur un enregistrement plus long
+  avant de conclure. Le traitement déjà en place dans le collecteur (retries transitoires via
+  `ServerError`) couvrirait ce cas sans modification.
+
+### Vérification de la piste « classement réel »
+
+Échantillon des résultats des dernières 24 h (268 matchs, 32 joueurs distincts, pool fermé qui se
+rencontre en boucle — comme le roster fictif de Mortal Kombat, mais avec de vrais noms). Tous des
+joueurs professionnels réels et identifiables (Alexis et Félix Lebrun, Truls Möregård, Dang Qiu,
+Darko Jorgic, Patrick Franziska, Simon Gauzy, Harmeet Desai, Manav Thakkar, Sathiyan
+Gnanasekaran...). **Résultat honnête, pas celui espéré** : le taux de victoire simulé sur cet
+échantillon d'un jour ne suit **pas clairement** le classement mondial réel — plusieurs têtes de
+série mondiales bien classées (Dang Qiu 38 %, Darko Jorgic 39 %) ont un taux de victoire simulé
+inférieur à des joueurs moins médiatisés (Ankur Bhattacharjee 79 % sur 19 matchs). Deux lectures
+possibles, non tranchées avec un seul jour de données : (a) le simulateur attribue ses propres
+notes de niveau, indépendantes du classement ITTF réel, ou (b) l'échantillon (12 à 26 matchs par
+joueur) est encore trop bruité pour révéler le signal. **L'identité du joueur reste malgré tout un
+signal statistiquement réel** (écart de 27 % à 79 % de victoires selon les joueurs, bien au-delà du
+hasard) — juste pas nécessairement câblée sur un classement externe accessible facilement, ce qui
+écarte pour l'instant l'idée d'importer un classement ITTF externe comme variable directe (et
+évite au passage la question des CGU d'une source tierce, cf. modalités du projet e-sport réel).
+
+**Conclusion de cette reconnaissance approfondie** : candidat confirmé, plus prometteur qu'estimé
+initialement grâce à la richesse des marchés et à la granularité point par point. Codable dans un
+futur collecteur avec le même socle technique (transport, résilience, dictionnaire) que Mortal
+Kombat, moyennant un nouveau parseur tenant compte de la structure par sous-match (par set) plutôt
+que la structure plate de Mortal Kombat.
