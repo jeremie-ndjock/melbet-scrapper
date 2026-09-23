@@ -1726,3 +1726,55 @@ numérique de ligue (« ligue 3066896 »), peu lisible sans ouvrir `config/leagu
 `Scheduler._league_label` (« Nom (identifiant) ») utilisé dans les deux alertes concernées
 (activation et rétablissement de la source de secours). 282 tests (+1), deux exécutions
 indépendantes stables. Déployé sur le VPS.
+
+## 33. Question de l'utilisateur : réduire les coûts en passant à un VPS gratuit (`t3.micro`)
+
+L'utilisateur a demandé s'il était possible de basculer l'instance EC2 de `m7i-flex.large`
+(2 vCPU, 8 Go, actuelle) vers `t3.micro` (2 vCPU, 1 Go, éligible au palier gratuit AWS).
+
+**Usage réel mesuré sur le VPS actuel avant de répondre** (`docker stats`, `free -h`) : `db`
+(TimescaleDB) 288 Mo, `grafana` 226 Mo, `scraper` 41 Mo, `prometheus` 23 Mo — environ 580 Mo pour
+les quatre conteneurs, sur une machine qui en a 7,6 Go.
+
+**Risques identifiés avant de recommander quoi que ce soit** :
+- Aucun swap configuré sur le VPS (`Swap: 0B`) : sur 1 Go seulement, ~580 Mo de conteneurs plus le
+  système et Docker laisseraient très peu de marge — un pic (sauvegarde `pg_dump` quotidienne,
+  rattrapage de résultats, requête Grafana lourde) pourrait déclencher l'OOM killer du noyau, avec
+  un risque réel de tuer Postgres en pleine écriture.
+- `t3.micro` est une instance « burstable » (crédits de CPU), contrairement à `m7i-flex.large` :
+  performance non garantie en continu sous charge soutenue.
+- Aucune IP Elastic allouée (toujours vrai depuis l'étape 11) : changer de type d'instance impose
+  un arrêt/redémarrage EC2, qui changerait l'adresse IP publique actuelle (`13.62.173.176`) — donc
+  une coupure de service et une reconfiguration du groupe de sécurité et de l'accès SSH.
+
+**Décision de l'utilisateur** : rester sur `m7i-flex.large` pour l'instant (le crédit AWS de
+100 $ couvre déjà ce coût). À revisiter quand ce crédit approchera de sa fin — noter que le suivi
+de coût AWS (`docs/runbook.md` §8) n'a jamais été confirmé comme configuré côté utilisateur.
+
+**Piste retenue pour tester sans risque, proposée par l'utilisateur** : plutôt que de migrer
+directement, déployer une **instance `t3.micro` séparée**, en parallèle du VPS de production, avec
+une copie du code et sa propre base isolée, pour observer le comportement réel en RAM sur
+plusieurs jours (au moins 3 à 7 jours, pour couvrir une vraie sauvegarde nocturne et un vrai cycle
+de réconciliation) avant de décider quoi que ce soit sur la production.
+
+**Plan validé, pas encore exécuté** :
+- Nouvelle instance EC2 `t3.micro`, Ubuntu 24.04 LTS, nouveau groupe de sécurité (SSH `/32`
+  uniquement), pas d'IP Elastic (instance temporaire).
+- Même dépôt cloné dans `/opt/oddscollector`, `.env` **entièrement séparé** : nouveau
+  `POSTGRES_PASSWORD`/`GRAFANA_ADMIN_PASSWORD` générés, et **`EMAIL_*`/`TELEGRAM_*` volontairement
+  laissés vides** — la fonctionnalité s'auto-désactive sans ces variables (déjà le comportement
+  existant), donc aucun message ni alerte de test ne peut jamais atteindre les vrais canaux de
+  production. Pas besoin de créer un salon Telegram dédié pour ce test.
+- Mêmes 4 ligues que la production dans `config/leagues.yaml` (charge mémoire réaliste), pile
+  Docker identique (`db`, `scraper`, `prometheus`, `grafana`), sauvegarde quotidienne configurée
+  aussi sur cette instance pour reproduire fidèlement les pics.
+- Observation via `free -h`, `docker stats --no-stream`, `dmesg | grep -i "killed process"`.
+- **Effet de bord assumé et signalé à l'utilisateur** : pendant le test, deux collecteurs
+  interrogent `melbet-cm.com` en parallèle (chacun à son propre rythme honnête d'~1 req/s) — environ
+  le double du trafic actuel vers le site pendant la durée du test. Un blocage sur l'une ou l'autre
+  instance arrêterait les deux, sans exception (même politique qu'ailleurs dans ce projet).
+- À la fin du test, quel que soit le résultat : **terminer l'instance de test** dans la console AWS
+  pour ne pas payer indéfiniment deux VPS en parallèle.
+
+**Statut** : en attente de la création de l'instance côté utilisateur (console AWS) avant de
+poursuivre le déploiement.
