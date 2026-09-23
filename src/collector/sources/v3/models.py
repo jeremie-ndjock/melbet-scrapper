@@ -46,12 +46,23 @@ class FullScoreDetail(Lenient):
     scoreOpp2: int = 0
 
 
+class PeriodScore(Lenient):
+    """Score en cours d'une période (set, manche...). Absent de Mortal Kombat (score connu
+    seulement une fois la période terminée) ; présent et mis à jour point par point pour AI Table
+    Tennis (Memoire.md, section 27) — la granularité la plus fine observée à ce jour."""
+    period: int
+    scoreOpp1: int = 0
+    scoreOpp2: int = 0
+    periodNameFull: str | None = None
+
+
 class Scores(Lenient):
     fullScore: str | None = None
     currentPeriod: int = 0
     currentPeriodName: str | None = None
     timer: Timer = Timer()
     fullScoreDetail: FullScoreDetail = FullScoreDetail()
+    periodScores: list[PeriodScore] = []
 
 
 class Opponent(Lenient):
@@ -74,6 +85,15 @@ class Video(Lenient):
     id: str | None = None
 
 
+class SubGame(Lenient):
+    """Un sous-match (ex. un set d'AI Table Tennis), avec ses propres marchés. Toujours vide pour
+    Mortal Kombat ; voir Memoire.md, section 27, pour la découverte de cette structure et
+    normalize.py pour comment ``sub_game_id`` est dérivé de son ``id``."""
+    id: int
+    subGameName: str | None = None
+    eventGroups: list[EventGroup] = []
+
+
 class Game(Lenient):
     id: int
     num: int | None = None
@@ -83,6 +103,7 @@ class Game(Lenient):
     opponent2: Opponent
     scores: Scores
     eventGroups: list[EventGroup] = []
+    subGamesForMainGame: list[SubGame] = []
     video: Video | None = None
 
 

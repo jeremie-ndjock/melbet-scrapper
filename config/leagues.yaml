@@ -1,4 +1,12 @@
-# Ligues collectées. Ajouter une ligue = ajouter une entrée ici (aucun changement de code).
+# Ligues collectées EN CONTINU par le collecteur de production (main.py). Ajouter une ligue ici
+# ne suffit pas : la ligne correspondante doit aussi exister dans la table `leagues` de la base
+# (contrainte de clé étrangère), ET son format de résultats doit être géré par results.py — sans
+# quoi le rattrapage/la réconciliation échoueraient en boucle (silencieusement journalisés, pas
+# fatals, mais inutiles) pour chaque match. AI Table Tennis (Memoire.md, section 27/28) a un
+# format de score différent ("2:0 (11:7,11:7)", pas encore géré) : ses deux salles ont leur ligne
+# dans `leagues` (migration 010) et leur normalisation des cotes est prête et testée, mais elles ne
+# sont volontairement PAS listées ici tant que ce parseur n'existe pas — les ajouter maintenant
+# activerait un rattrapage de résultats voué à échouer sur chaque match, en production.
 leagues:
   - id: 1252965
     name: Mortal Kombat X

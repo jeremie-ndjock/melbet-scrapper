@@ -61,18 +61,43 @@ def test_flatten_game_builds_selection_identity():
                                       "eventParams": {"params": ["(7.5)"]}}]]},
     ])
     rows = flatten_game(game)
-    assert set(rows) == {(1, 1, Decimal(0)), (1, 3, Decimal(0)), (17, 9, Decimal("7.5"))}
-    total_row = rows[(17, 9, Decimal("7.5"))]
+    assert set(rows) == {(1, 1, Decimal(0), 0), (1, 3, Decimal(0), 0), (17, 9, Decimal("7.5"), 0)}
+    total_row = rows[(17, 9, Decimal("7.5"), 0)]
     assert total_row.odds == Decimal("1.4") and total_row.is_center and total_row.line == Decimal("7.5")
 
 
 def test_flatten_game_blocked_selection_is_preserved():
     game = _game(eventGroups=[{"groupId": 1, "events": [[{"type": 1, "cf": 1.1, "blocked": True}]]}])
     rows = flatten_game(game)
-    assert rows[(1, 1, Decimal(0))].blocked is True
+    assert rows[(1, 1, Decimal(0), 0)].blocked is True
 
 
 def test_flatten_game_missing_parameter_uses_zero_default():
     game = _game(eventGroups=[{"groupId": 1, "events": [[{"type": 1, "cf": 1.1}]]}])
-    row = flatten_game(game)[(1, 1, Decimal(0))]
+    row = flatten_game(game)[(1, 1, Decimal(0), 0)]
     assert row.param == Decimal(0)  # convention du schéma : « sans paramètre » = 0, jamais NULL
+
+
+def test_flatten_game_top_level_markets_use_sub_game_id_zero():
+    """sub_game_id = 0 signifie « au niveau du match entier » (le seul cas pour Mortal Kombat) —
+    voir migrations/009_odds_snapshots_subgame.sql."""
+    game = _game(eventGroups=[{"groupId": 1, "events": [[{"type": 1, "cf": 1.5}]]}])
+    row = flatten_game(game)[(1, 1, Decimal(0), 0)]
+    assert row.sub_game_id == 0
+
+
+def test_flatten_game_includes_subgame_markets_found_for_ai_table_tennis():
+    """Structure découverte pour AI Table Tennis (Memoire.md, section 27) : les marchés par set
+    vivent dans ``subGamesForMainGame``, pas dans ``eventGroups`` du match — jamais vu pour Mortal
+    Kombat (toujours vide), mais le décodage doit fonctionner pour les deux."""
+    game = _game(eventGroups=[{"groupId": 1, "events": [[{"type": 1, "cf": 1.5}]]}],
+                 subGamesForMainGame=[
+        {"id": 111, "subGameName": "1er set",
+         "eventGroups": [{"groupId": 2, "events": [[{"type": 7, "parameter": 2.5, "cf": 1.36}]]}]},
+        {"id": 222, "subGameName": "2 Set",
+         "eventGroups": [{"groupId": 2, "events": [[{"type": 7, "parameter": 2.5, "cf": 1.90}]]}]},
+    ])
+    rows = flatten_game(game)
+    assert set(rows) == {(1, 1, Decimal(0), 0), (2, 7, Decimal("2.5"), 111), (2, 7, Decimal("2.5"), 222)}
+    assert rows[(2, 7, Decimal("2.5"), 111)].odds == Decimal("1.36")
+    assert rows[(2, 7, Decimal("2.5"), 222)].odds == Decimal("1.90")

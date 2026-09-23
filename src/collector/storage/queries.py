@@ -6,12 +6,15 @@ crée pas de doublon et ne fait jamais reculer un état.
 from __future__ import annotations
 
 # Cotes : ajout seul. Rejouer la même ligne ne change rien (jamais de mise à jour).
+# sub_game_id = 0 pour un marché au niveau du match entier (Mortal Kombat, et une partie des
+# marchés d'AI Table Tennis) ; sinon l'identifiant du sous-match (set) fourni par le site — voir
+# migrations/009_odds_snapshots_subgame.sql.
 INSERT_ODDS_SNAPSHOT = """
 INSERT INTO odds_snapshots
-    (ts_server, game_id, g, t, param, league_id, collected_at,
+    (ts_server, game_id, g, t, param, sub_game_id, league_id, collected_at,
      odds, blocked, is_center, round_no, line, source, latency_ms)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (ts_server, game_id, g, t, param) DO NOTHING
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+ON CONFLICT (ts_server, game_id, g, t, param, sub_game_id) DO NOTHING
 """
 
 # Match : first_seen ne change jamais ; last_seen ne recule jamais ; un match terminé ne redevient pas « live ».
@@ -63,7 +66,7 @@ ON CONFLICT (game_id) DO NOTHING
 
 # Relecture de l'état courant des sélections de matchs donnés (redémarrage du collecteur).
 LATEST_ODDS_FOR_GAMES = """
-SELECT game_id, g, t, param, odds, blocked, is_center, ts_server
+SELECT game_id, g, t, param, sub_game_id, odds, blocked, is_center, ts_server
 FROM odds_latest
 WHERE game_id = ANY($1::bigint[])
 """

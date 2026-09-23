@@ -1479,3 +1479,49 @@ initialement grâce à la richesse des marchés et à la granularité point par 
 futur collecteur avec le même socle technique (transport, résilience, dictionnaire) que Mortal
 Kombat, moyennant un nouveau parseur tenant compte de la structure par sous-match (par set) plutôt
 que la structure plate de Mortal Kombat.
+
+## 28. Début de l'implémentation : support des marchés par sous-match (2026-09-23)
+
+À la demande de l'utilisateur, début du codage du collecteur pour AI Table Tennis. Portée
+volontairement limitée à ce qui est réutilisable pour N'IMPORTE quel sport à sous-matchs (pas
+spécifique à AI Table Tennis) : le socle de normalisation des cotes. Le rattrapage des résultats
+(format de score différent, `"2:0 (11:7,11:7)"`) est explicitement reporté à une étape suivante.
+
+**Décision d'architecture** : identité d'une sélection étendue de `(g, t, param)` à
+`(g, t, param, sub_game_id)`. `sub_game_id = 0` signifie « marché au niveau du match entier »
+(le seul cas pour Mortal Kombat, comportement inchangé) ; sinon c'est l'identifiant du sous-match
+(ex. un set) **tel que fourni par le site lui-même** — chaque sous-match a son propre `id`,
+distinct de celui du match, une découverte pratique qui évite d'avoir à inventer un schéma
+d'identifiants.
+
+**Fichiers modifiés** :
+
+| Fichier | Changement |
+|---|---|
+| `migrations/009_odds_snapshots_subgame.sql` | Ajoute `sub_game_id`, étend la clé primaire et la vue `odds_latest`. Sûr à appliquer maintenant : aucun chunk n'est encore compressé à ce stade du projet (politique à 7 jours). |
+| `migrations/010_ai_table_tennis_leagues.sql` | Ajoute les deux salles à la table `leagues` (satisfait la contrainte de clé étrangère), sans encore les activer dans `config/leagues.yaml` (voir plus bas). |
+| `src/collector/sources/v3/models.py` | Nouveau modèle `SubGame`, champ `Game.subGamesForMainGame`, `Scores.periodScores` (granularité point par point, inutilisée par Mortal Kombat mais désormais disponible). |
+| `src/collector/normalize.py` | `flatten_game` parcourt maintenant aussi les sous-matchs ; `SnapshotRow.key` devient un quadruplet. |
+| `src/collector/dedupe.py`, `storage/writer.py`, `storage/queries.py` | Propagent `sub_game_id` de bout en bout (détection de changement, écriture, relecture au redémarrage). |
+
+**Décision opérationnelle explicite, pour ne pas casser la production silencieusement** : les deux
+salles NE SONT PAS ajoutées à `config/leagues.yaml` dans ce commit, bien qu'elles existent déjà
+dans la table `leagues`. Les ajouter activerait immédiatement, sur le vrai VPS au prochain
+déploiement, le rattrapage et la réconciliation des résultats pour ces ligues — qui échoueraient
+en boucle sur *chaque* match (le format de score n'est pas encore géré par `results.py`), sans
+crash mais avec un bruit de journalisation inutile et surtout sans jamais rien stocker dans
+`results`/`round_results`. Activation en production repoussée à l'étape qui ajoutera ce parseur.
+
+**Résultat des tests** : 259 tests au total (+5), couverture 95 % maintenue, deux exécutions
+indépendantes stables.
+
+**Vérifié en conditions réelles** (script ponctuel, supprimé après usage) : un vrai match AI Table
+Tennis (Manush Shah vs Akash Pal) traité par le pipeline `process_cycle` **existant, inchangé**,
+sur une base jetable. Confirmé : 2 groupes de marchés au niveau du match + 2 sous-matchs actifs
+(« 3 Set », « 2 Set ») avec respectivement 4 et 12 groupes, 100 lignes écrites correctement
+réparties entre `sub_game_id` 0 et les deux identifiants de sous-match réels, et un deuxième cycle
+identique n'écrivant strictement aucune ligne supplémentaire (option A intacte).
+
+**Prochaine étape naturelle** : un parseur de résultats pour le format `"S:S (P:P,P:P,...)"`
+(nettement plus simple que celui de Mortal Kombat, pas de type de finish à décoder), puis
+l'activation réelle dans `config/leagues.yaml` et un déploiement complet sur le VPS.

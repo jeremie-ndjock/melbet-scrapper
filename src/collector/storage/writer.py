@@ -66,7 +66,7 @@ async def write_odds_batch(
         return 0
     args = [
         (
-            ts_server, row.game_id, row.g, row.t, row.param, league_id, collected_at,
+            ts_server, row.game_id, row.g, row.t, row.param, row.sub_game_id, league_id, collected_at,
             row.odds, row.blocked, row.is_center, row.round_no, row.line, source, latency_ms,
         )
         for row in rows
@@ -83,6 +83,7 @@ async def load_latest_odds(conn: asyncpg.Connection, game_ids: list[int]) -> dic
     by_game: dict[int, list[SnapshotRow]] = {}
     for r in rows:
         by_game.setdefault(r["game_id"], []).append(
-            SnapshotRow(r["game_id"], r["g"], r["t"], r["param"], r["odds"], r["blocked"], r["is_center"], None, None)
+            SnapshotRow(r["game_id"], r["g"], r["t"], r["param"], r["sub_game_id"],
+                        r["odds"], r["blocked"], r["is_center"], None, None)
         )
     return by_game

@@ -22,17 +22,17 @@ _SelectionState = tuple[Decimal | None, bool]
 
 class ChangeDetector:
     def __init__(self) -> None:
-        self._state: dict[int, dict[tuple[int, int, Decimal], _SelectionState]] = {}
+        self._state: dict[int, dict[tuple[int, int, Decimal, int], _SelectionState]] = {}
 
     def preload(self, game_id: int, rows: list[SnapshotRow]) -> None:
         """Initialise l'état d'un match à partir de son dernier état connu en base."""
         self._state[game_id] = {row.key: (row.odds, row.blocked) for row in rows}
 
-    def diff(self, game_id: int, current: dict[tuple[int, int, Decimal], SnapshotRow]) -> list[SnapshotRow]:
+    def diff(self, game_id: int, current: dict[tuple[int, int, Decimal, int], SnapshotRow]) -> list[SnapshotRow]:
         """Retourne les lignes à écrire pour ce relevé : nouvelles, changées, ou tout juste retirées."""
         previous = self._state.get(game_id, {})
         changes: list[SnapshotRow] = []
-        new_state: dict[tuple[int, int, Decimal], _SelectionState] = dict(previous)
+        new_state: dict[tuple[int, int, Decimal, int], _SelectionState] = dict(previous)
 
         for key, row in current.items():
             prior = previous.get(key)
@@ -45,8 +45,8 @@ class ChangeDetector:
                 continue
             if prior[0] is None:
                 continue  # déjà signalée comme retirée lors d'un cycle précédent : rien à réécrire
-            g, t, param = key
-            changes.append(SnapshotRow(game_id, g, t, param, None, False, False, None, None))
+            g, t, param, sub_game_id = key
+            changes.append(SnapshotRow(game_id, g, t, param, sub_game_id, None, False, False, None, None))
             new_state[key] = (None, False)
 
         self._state[game_id] = new_state

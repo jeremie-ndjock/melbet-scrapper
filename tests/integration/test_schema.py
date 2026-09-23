@@ -22,9 +22,9 @@ async def add_event(db, game_id: int = 1, league_id: int = MK_X, status: str = "
 
 
 async def add_odds(db, ts: datetime, *, game_id: int = 1, g: int = 1, t: int = 1, param: str = "0",
-                   odds: str | None = "1.500", blocked: bool = False, source: int = 1):
+                   sub_game_id: int = 0, odds: str | None = "1.500", blocked: bool = False, source: int = 1):
     await db.execute(
-        queries.INSERT_ODDS_SNAPSHOT, ts, game_id, g, t, Decimal(param), MK_X, ts,
+        queries.INSERT_ODDS_SNAPSHOT, ts, game_id, g, t, Decimal(param), sub_game_id, MK_X, ts,
         None if odds is None else Decimal(odds), blocked, False, None, None, source, 120,
     )
 
@@ -35,9 +35,16 @@ async def count_odds(db) -> int:
 
 # --------------------------------------------------------------------------- référence
 
+TT_PRAGUE = 3066896
+TT_GOA = 3066897
+
+
 async def test_leagues_are_seeded(db):
     rows = await db.fetch("SELECT league_id, name FROM leagues ORDER BY league_id")
-    assert {r["league_id"]: r["name"] for r in rows} == {MK_X: "Mortal Kombat X", MK_3: "Mortal Kombat 3"}
+    assert {r["league_id"]: r["name"] for r in rows} == {
+        MK_X: "Mortal Kombat X", MK_3: "Mortal Kombat 3",
+        TT_PRAGUE: "AI Table Tennis Prague", TT_GOA: "AI Table Tennis Goa",
+    }
 
 
 # --------------------------------------------------------------------------- cotes
@@ -98,6 +105,19 @@ async def test_odds_constraints(db, kwargs, error):
     await add_event(db)
     with pytest.raises(error):
         await add_odds(db, T0, **kwargs)
+
+
+async def test_same_selection_in_different_subgames_are_stored_separately(db):
+    """Découvert avec AI Table Tennis (Memoire.md, section 27 ; migration 009) : (g, t, param)
+    seul ne suffit pas à identifier une sélection quand les marchés sont répartis par sous-match
+    (un set) — sans sub_game_id dans la clé, la deuxième écriture écraserait silencieusement la
+    première plutôt que de créer une deuxième ligne."""
+    await add_event(db)
+    await add_odds(db, T0, g=2, t=7, param="2.5", sub_game_id=111, odds="1.360")
+    await add_odds(db, T0, g=2, t=7, param="2.5", sub_game_id=222, odds="1.900")
+    assert await count_odds(db) == 2
+    rows = await db.fetch("SELECT sub_game_id, odds FROM odds_snapshots ORDER BY sub_game_id")
+    assert [(r["sub_game_id"], r["odds"]) for r in rows] == [(111, Decimal("1.360")), (222, Decimal("1.900"))]
 
 
 # --------------------------------------------------------------------------- matchs

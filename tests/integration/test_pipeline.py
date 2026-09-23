@@ -73,9 +73,9 @@ async def test_full_match_replay_mortal_kombat_x(db):
         {"liga": {"id": 1, "name": "x"}, "gamesCount": 1, "games": [last_game]}
     ).games[0])
     latest_rows = await db.fetch(
-        "SELECT g, t, param, odds, blocked FROM odds_latest WHERE game_id = $1", game_id
+        "SELECT g, t, param, sub_game_id, odds, blocked FROM odds_latest WHERE game_id = $1", game_id
     )
-    latest_by_key = {(r["g"], r["t"], r["param"]): r for r in latest_rows}
+    latest_by_key = {(r["g"], r["t"], r["param"], r["sub_game_id"]): r for r in latest_rows}
 
     assert set(expected_final) <= set(latest_by_key)  # toute sélection active est bien en base
     for key, expected in expected_final.items():
