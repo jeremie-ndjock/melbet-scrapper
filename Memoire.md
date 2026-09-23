@@ -1293,3 +1293,132 @@ PASSED! ») faute de LibreOffice disponible sur cette machine pour un rendu visu
 défaut réel de bordure de paragraphe a été trouvé et corrigé à cette occasion (docx-js sérialise
 les bordures de paragraphe dans un ordre non conforme au schéma OOXML quel que soit l'ordre fourni
 en entrée ; contournement : fond grisé sans bordure pour les blocs de code du document).
+
+## 26. Exploration du catalogue esports complet de MelBet (2026-09-23)
+
+À la demande de l'utilisateur, exploration des trois onglets de `/fr/esports/` pour identifier
+d'autres cybersports à fort potentiel de forecasting, au-delà des deux ligues Mortal Kombat déjà
+suivies. Playwright était de nouveau indisponible au départ (timeout de connexion) ; exploration
+menée d'abord via les mêmes API déjà utilisées pour Mortal Kombat (identification honnête,
+`OddsCollector/1.0`, ~1 requête/seconde), puis confirmée visuellement une fois Playwright
+reconnecté en cours de session.
+
+### Onglet « Réel » — tournois humains authentiques
+
+`sportId=40` (« E-sport »), 56 ligues actives sur 24 h : **CS 2, Dota 2, League of Legends,
+Valorant, Mobile Legends, Rainbow Six, Standoff 2, Deadlock, StarCraft II, Heroes of Might and
+Magic III, Crossfire** — vrais joueurs, vraies équipes (PGL Wallachia, ESL Challenger League,
+EMEA Masters...). Volume par ligue nettement plus faible que le virtuel (1 à ~40 matchs/24h par
+ligue, contre des centaines pour un sport virtuel) puisque ce sont de vrais calendriers de
+compétition, pas des générateurs 24/7. Nature du problème radicalement différente : la prédiction
+dépendrait de la forme réelle des équipes/joueurs, pas d'un algorithme caractérisable
+statistiquement — évalué comme un projet distinct, pas une extension du travail Mortal Kombat
+(modalités proposées à l'utilisateur, voir plus bas).
+
+### Onglet « Virtuel » — confirmation et enrichissement du rapport précédent
+
+98 catégories de sports virtuels au total (`GET .../v3/leftmenu/virtual`). Classement par volume
+mesuré sur 24 h (`GET /service-api/result/web/api/v2/champs`, params `country`/`partner`
+requis en plus de `fcountry`/`gr` pour cet endpoint précis — sinon 400) :
+
+| Rang | Sport | Volume/24h | Évaluation |
+|---|---|---|---|
+| 1 | FIFA (`sportId=85`) | 3 407 | Buts = événements discrets, littérature de forecasting football mature (Poisson) |
+| 2 | Mortal Kombat, famille complète (`sportId=103`) | **1 782** (dont seulement 570 pour les 2 ligues déjà suivies) | **Extension directe et immédiate** : MK1, MK11, MK11 (BO3), MK11 XXL découverts en plus de MKX/MK3 — même moteur probable, pipeline déjà prêt |
+| — | WWE 2K (`sportId=101`) | 914 | Issues discrètes (tombé/soumission/décompte) à vérifier |
+| — | NBA 2K (`sportId=91`) | 595 | Points/quarts-temps, forecasting basket mature |
+| — | TEKKEN 8 (`sportId=145`) | 574 | Même genre que MK (rounds, personnages nommés) |
+| — | NHL (`sportId=89`) | 497 | Buts/périodes |
+| — | PES (`sportId=144`) | 488 | Même famille que FIFA |
+| — | UFC (`sportId=90`) | 367 | Structure quasi identique à MK (KO/soumission/décision par round) |
+
+**Exclus explicitement, aucun potentiel** : tous les jeux de casino virtuel (Baccara, Roulette,
+Dés, Durak, Seka, 21/Blackjack, Poker, Higher vs Lower, Crystal, Victory Formula, et tout ce qui
+est littéralement nommé « Random Match »/« Random Battle ») — génération purement aléatoire,
+aucune identité d'équipe/joueur exploitable, jusqu'à 2 880 matchs/24h pour certains (Texas
+Hold'em/IndianPoker) mais sans aucun objet pour du forecasting.
+
+### Onglet « MelCyber » (stream) — pas un onglet esport à part entière
+
+Contrairement à ce que le nom suggérait, majoritairement du live-streaming de **vrais matchs de
+sports réels** (`sportId` standards : 1=football, 3=basketball, 4=tennis, 2=hockey sur glace).
+Deux exceptions simulées trouvées dedans, hors de leur place logique (onglet « Virtuel ») :
+- **AI Table Tennis** (2 salles, Prague et Goa, `sportId=10`) — 134 matchs/24h **par salle**,
+  soit 268/24h cumulé. Voir section 27, reconnaissance approfondie démarrée le jour même.
+- **Virtual Kabaddi** (Quantum, PKL) — 21 matchs/24h, volume jugé trop faible pour l'instant.
+
+### Modalités proposées pour un projet distinct « E-sport réel »
+
+Si l'utilisateur souhaite un jour explorer le forecasting sur les compétitions e-sport réelles
+(CS 2, Dota 2, LoL...), les conditions suivantes ont été posées avant tout démarrage :
+1. **Autorisation contractuelle distincte à confirmer** : l'autorisation actuelle porte sur
+   MelBet Cameroun / les ligues virtuelles Mortal Kombat (voir l'en-tête de ce document) ; un
+   nouveau périmètre (même sur le même site, onglet différent) doit être explicitement confirmé
+   par l'utilisateur avant toute collecte, au même titre que l'a été le choix des deux ligues MK.
+2. **Mêmes règles de conduite non négociables** que pour tout le reste du projet (section 20) :
+   identification honnête et fixe, aucune évasion anti-bot, un blocage est un signal d'arrêt,
+   jamais un obstacle à contourner.
+3. **Seules des données publiques de compétition** (résultats, calendriers, statistiques
+   officielles) — jamais de données personnelles sur les joueurs au-delà de ce qui est déjà
+   public dans le cadre professionnel (identique au traitement des noms de combattants MK).
+4. **Sources tierces potentiellement nécessaires** (ex. classements/statistiques HLTV,
+   Liquipedia, pour contextualiser la forme des équipes) : chacune a ses propres conditions
+   d'utilisation, à vérifier et respecter séparément — jamais supposées couvertes par
+   l'autorisation MelBet.
+5. **Attentes de volume et de délai réalistes, posées dès le départ** : contrairement au virtuel
+   (des centaines de matchs/jour, 24/7), le e-sport réel suit un vrai calendrier de compétition —
+   des semaines, voire des mois, peuvent être nécessaires pour accumuler un historique exploitable
+   par équipe/matchup, largement au-delà des délais mesurés pour Mortal Kombat (section 5 du plan
+   d'entraînement).
+6. **Vigilance renforcée sur l'intégrité des compétitions** : contrairement à un générateur
+   virtuel, un vrai résultat sportif peut en théorie être affecté par des enjeux extra-sportifs
+   (paris truqués, etc.) — utiliser uniquement des sources de données officielles et reconnues,
+   ne jamais bâtir sur une source dont la fiabilité n'est pas établie.
+
+## 27. Reconnaissance approfondie : AI Table Tennis (2026-09-23)
+
+Démarrée le jour même à la demande de l'utilisateur, sur les deux salles trouvées section 26
+(`champId` 3066896 « Prague », 3066897 « Goa », `sportId=10`).
+
+**Infrastructure confirmée identique à Mortal Kombat** — même famille d'API
+(`cyber-api/mainfeedlive/web/cyber/v3/gamesByChamp`, `service-api/result/web/api/v3/games`),
+mêmes paramètres (`fcountry`, `gr`, `lng`, `ref`, tri alphabétique). Avantage concret : le
+transport, la résilience (coupe-circuit, source de secours), et une bonne partie de la structure
+du collecteur existant seraient réutilisables presque tels quels.
+
+**Différences structurelles réelles, à traiter avant tout code** :
+- **Noms de joueurs réels et reconnaissables** utilisés comme adversaires (ex. Alexis Lebrun,
+  joueur français classé au niveau mondial ; Manav Thakkar, joueur indien de haut niveau) — très
+  probablement une simulation dont les probabilités sont pondérées par un classement réel (comme
+  FIFA utilise de vrais noms de club), ce qui rendrait l'identité du joueur un signal appris
+  d'autant plus pertinent (à vérifier empiriquement : les taux de victoire simulés corrèlent-ils
+  avec les classements ITTF réels ?).
+- **Format de match fixe** : `matchInfoObj.matchFormat = "3 sets Match"` (au meilleur des 3 sets),
+  cadence mesurée ≈ 1 match toutes les 10-11 minutes par salle (134 matchs/24h).
+- **Les marchés ne sont PAS au niveau du match mais au niveau de chaque set** : contrairement à
+  Mortal Kombat où `eventGroups` est directement sur le match, ici il est **vide au niveau
+  racine** et les cotes vivent dans `subGamesForMainGame[].eventGroups` (un sous-objet par set,
+  ex. `subGameName: "3 Set"`) — une vraie différence d'architecture qui demanderait un nouveau
+  parseur (traversée des sous-matchs), pas une réutilisation directe de `normalize.py`.
+- **Score officiel déjà propre et facile à analyser** :
+  `service-api/result/web/api/v3/games` renvoie directement `"score": "2:0 (11:7,11:7)"` — score
+  final en sets puis score de chaque set entre parenthèses, un format bien plus simple à parser
+  que la chaîne Mortal Kombat (pas de type de finish à décoder, juste des points).
+- **Groupes de marchés observés sur un match en direct** (non encore recoupés avec le dictionnaire
+  officiel CDN, à faire) : `groupId 17` (Total de points du set, ex. plus/moins de 18.5),
+  `groupId 2` (handicap, ex. ±2.5), `groupId 14` (deux issues seulement, probablement vainqueur du
+  set), `groupId 60` (plusieurs paramètres 5/7/9, signification non établie).
+
+**Volume confirmé** : 134 matchs/24h par salle (2 salles, 268/24h cumulé) — modeste comparé à
+Mortal Kombat (570/24h sur 2 ligues) mais avec une granularité par set potentiellement aussi riche
+que Mortal Kombat par manche, sur un sport dont le forecasting est un domaine mature (tennis de
+table : probabilité de gain par point, modèles déjà publiés dans la littérature sportive).
+
+**État à la fin de cette reconnaissance initiale** : suffisant pour confirmer que c'est un
+candidat sérieux (infrastructure connue, score propre, cadence correcte), mais **pas encore assez
+pour coder un collecteur** — reste à faire, dans le même esprit que la reconnaissance Mortal
+Kombat originale (section 2 et suivantes) : décodage complet des groupes de marchés via le
+dictionnaire CDN, capture d'un match complet pour confirmer l'absence de piège (ex. l'égalité
+2:2 trouvée en plein développement pour Mortal Kombat 3), et une vérification que les probabilités
+simulées corrèlent bien avec un classement réel avant d'investir dans des variables « identité du
+joueur ».
