@@ -22,6 +22,10 @@ GAME_ID = 755197701
 LEAGUE_ID = 1252965
 LEAGUE_NAME = "Mortal Kombat X"
 
+AI_TT_GAME_ID = 755424452
+AI_TT_LEAGUE_ID = 3066896
+AI_TT_LEAGUE_NAME = "AI Table Tennis Prague"
+
 
 def _game(score1: int, score2: int, period_name: str = "3ème round") -> Game:
     return GamesByChampResponse.model_validate({
@@ -29,6 +33,19 @@ def _game(score1: int, score2: int, period_name: str = "3ème round") -> Game:
             "id": GAME_ID, "startTs": 1000, "updateTs": 1000,
             "opponent1": {"fullName": "Goro", "opps": [{"id": 1}]},
             "opponent2": {"fullName": "Ermac", "opps": [{"id": 2}]},
+            "scores": {"fullScore": f"{score1}-{score2}", "currentPeriodName": period_name,
+                       "fullScoreDetail": {"scoreOpp1": score1, "scoreOpp2": score2}},
+            "eventGroups": [],
+        }],
+    }).games[0]
+
+
+def _tt_game(score1: int, score2: int, period_name: str = "2 Set") -> Game:
+    return GamesByChampResponse.model_validate({
+        "liga": {"id": AI_TT_LEAGUE_ID, "name": "x"}, "gamesCount": 1, "games": [{
+            "id": AI_TT_GAME_ID, "startTs": 1000, "updateTs": 1000,
+            "opponent1": {"fullName": "Truls Moregard", "opps": [{"id": 1}]},
+            "opponent2": {"fullName": "Felix Lebrun", "opps": [{"id": 2}]},
             "scores": {"fullScore": f"{score1}-{score2}", "currentPeriodName": period_name,
                        "fullScoreDetail": {"scoreOpp1": score1, "scoreOpp2": score2}},
             "eventGroups": [],
@@ -51,6 +68,22 @@ class FakeStatistic:
             return httpx.Response(403, text="bloqué")
         body = {"fullScoreDetail": {"scoreOpp1": 0, "scoreOpp2": 0},
                 "statistic": {"main": {"RoundTable": json.dumps(self.rounds)}}}
+        return httpx.Response(200, text=json.dumps(body))
+
+
+class FakeTableTennisStatistic:
+    """Équivalent de ``FakeStatistic`` pour AI Table Tennis : ``periodScores`` au lieu de
+    ``statistic.main.RoundTable`` (ce champ n'existe pas du tout pour ce sport — un vrai défaut
+    de production trouvé le 2026-09-23 : le fil de match restait silencieux sans jamais publier,
+    ni journaliser d'erreur, car le décodage cherchait un champ qui n'existe pas pour ce sport)."""
+
+    def __init__(self):
+        self.period_scores: list[dict] = []
+        self.calls = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        body = {"fullScoreDetail": {"scoreOpp1": 0, "scoreOpp2": 0}, "periodScores": self.period_scores}
         return httpx.Response(200, text=json.dumps(body))
 
 
@@ -77,8 +110,8 @@ class FakeSender(MatchFeedSender):
         return True
 
 
-async def _seed_event(db, game: Game) -> None:
-    await upsert_event(db, game, league_id=1252965, status="live", seen_at=datetime.now(timezone.utc))
+async def _seed_event(db, game: Game, league_id: int = 1252965) -> None:
+    await upsert_event(db, game, league_id=league_id, status="live", seen_at=datetime.now(timezone.utc))
 
 
 async def test_first_completed_round_sends_a_new_message_and_fills_round_results(db):
@@ -235,3 +268,80 @@ async def test_a_transient_statistic_error_is_tolerated_for_this_game_only(db, c
         await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)  # ne lève rien
 
     assert sender.sent == []
+
+
+async def test_ai_table_tennis_completed_set_sends_a_message_and_fills_round_results(db):
+    """Régression du vrai défaut trouvé le 2026-09-23 : ``periodScores``, pas ``RoundTable``, et un
+    ``winner`` déjà sous forme d'index (pas de nom à comparer, contrairement à Mortal Kombat)."""
+    stat = FakeTableTennisStatistic()
+    stat.period_scores = [{"period": 1, "scoreOpp1": 4, "scoreOpp2": 11}]
+    sender = FakeSender()
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender,
+                              chat_ids={AI_TT_LEAGUE_ID: "-1"}, league_sport_ids={AI_TT_LEAGUE_ID: 10})
+
+    game = _tt_game(0, 1)
+    await _seed_event(db, game, league_id=AI_TT_LEAGUE_ID)
+    await proc.process_games(db, [game], league_id=AI_TT_LEAGUE_ID, league_name=AI_TT_LEAGUE_NAME)
+
+    assert len(sender.sent) == 1
+    assert "🏓 Set 1 : 4-11 — Vainqueur Felix Lebrun [Score de sets : 0-1]" in sender.sent[0]
+    row = await db.fetchrow(
+        "SELECT winner, seconds, finish_di, wt, fw FROM round_results WHERE game_id = $1 AND round_no = 1",
+        AI_TT_GAME_ID,
+    )
+    assert row["winner"] == 2  # Felix Lebrun est le joueur 2
+    assert row["seconds"] is None and row["finish_di"] is None and row["wt"] is None and row["fw"] is None
+
+
+async def test_ai_table_tennis_in_progress_set_is_not_mistaken_for_completed(db):
+    """Un set en cours (ex. 7:7) apparaît dans ``periodScores`` mais n'est pas encore terminé —
+    aucun set officiel ne se termine à égalité. Doit être traité comme le round MK en retard :
+    rien publié tant que le tableau n'a pas rattrapé le score visible dans gamesByChamp."""
+    stat = FakeTableTennisStatistic()
+    stat.period_scores = [{"period": 1, "scoreOpp1": 4, "scoreOpp2": 11}, {"period": 2, "scoreOpp1": 7, "scoreOpp2": 7}]
+    sender = FakeSender()
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender,
+                              chat_ids={AI_TT_LEAGUE_ID: "-1"}, league_sport_ids={AI_TT_LEAGUE_ID: 10})
+
+    game = _tt_game(0, 1)  # un seul set terminé dans gamesByChamp
+    await _seed_event(db, game, league_id=AI_TT_LEAGUE_ID)
+    await proc.process_games(db, [game], league_id=AI_TT_LEAGUE_ID, league_name=AI_TT_LEAGUE_NAME)
+
+    assert len(sender.sent) == 1  # seul le set 1 (terminé) est publié, jamais le set 2 en cours
+    assert "Set 2" not in sender.sent[0]
+
+
+async def test_ai_table_tennis_finished_match_announces_the_winner(db):
+    stat = FakeTableTennisStatistic()
+    stat.period_scores = [
+        {"period": 1, "scoreOpp1": 11, "scoreOpp2": 4},
+        {"period": 2, "scoreOpp1": 11, "scoreOpp2": 7},
+    ]
+    sender = FakeSender()
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender,
+                              chat_ids={AI_TT_LEAGUE_ID: "-1"}, league_sport_ids={AI_TT_LEAGUE_ID: 10})
+
+    game = _tt_game(2, 0, period_name="Jeu terminé")
+    await _seed_event(db, game, league_id=AI_TT_LEAGUE_ID)
+    await proc.process_games(db, [game], league_id=AI_TT_LEAGUE_ID, league_name=AI_TT_LEAGUE_NAME)
+
+    assert "🏆 VAINQUEUR DU MATCH : Truls Moregard (2-0)" in sender.sent[0]
+    finished = await db.fetchval("SELECT match_finished FROM match_feed WHERE game_id = $1", AI_TT_GAME_ID)
+    assert finished is True
+
+
+async def test_a_league_without_sport_mapping_defaults_to_mortal_kombat_decoder(db):
+    """Sans entrée dans ``league_sport_ids`` (ex. ``LiveFeedProcessor`` construit sans ce
+    paramètre), le décodage Mortal Kombat reste le comportement par défaut — jamais de plantage,
+    même s'il ne trouve rien d'utile pour un autre sport (voir Memoire.md, section 31)."""
+    stat = FakeStatistic()
+    stat.rounds = [{"R": 1, "T": 31, "W": "Goro", "DI": "Regular", "WT": "0", "FW": False}]
+    sender = FakeSender()
+    proc = LiveFeedProcessor(http=make_http(stat.handler), site_params={"lng": "fr"}, sender=sender, chat_ids={LEAGUE_ID: "-1"})
+
+    game = _game(1, 0)
+    await _seed_event(db, game)
+    await proc.process_games(db, [game], league_id=LEAGUE_ID, league_name=LEAGUE_NAME)
+
+    assert len(sender.sent) == 1
+    assert "💥 Manche 1" in sender.sent[0]

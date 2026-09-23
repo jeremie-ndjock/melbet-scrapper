@@ -3,11 +3,15 @@ tolérance aux entrées illisibles, et l'appel complet (mock HTTP, données rée
 2026-09-22 sur un match en cours)."""
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
 from collector.sources.v3.statistic import (
     RoundTableEntry,
+    SetTableEntry,
+    decode_period_table,
     decode_round_table,
     fetch_statistic,
     parse_statistic,
@@ -34,6 +38,25 @@ REAL_RESPONSE = """{
 NOT_STARTED_RESPONSE = """{
   "fullScoreDetail": {"scoreOpp1": 0, "scoreOpp2": 0},
   "statistic": {"main": {"RoundTable": "[]", "id_tourney": "100802"}}
+}"""
+
+# Capture réelle (2026-09-23) : AI Table Tennis n'a PAS de champ "statistic" du tout — un vrai
+# défaut de production trouvé ce jour-là, voir Memoire.md section 31. "periodScores" est la seule
+# source du détail par set, au niveau racine de la réponse (pas imbriqué).
+REAL_TABLE_TENNIS_RESPONSE = """{
+  "fullScore": "0-1",
+  "periodScores": [
+    {"period": 1, "scoreOpp1": 4, "scoreOpp2": 11, "periodNameFull": "1er set"},
+    {"period": 2, "scoreOpp1": 7, "scoreOpp2": 7, "periodNameFull": "2 Set"}
+  ],
+  "currentPeriod": 2,
+  "currentPeriodName": "2 Set",
+  "scoreOpp1": 0,
+  "scoreOpp2": 1,
+  "serve": 1,
+  "periodScoresStr": "4-11,7-7",
+  "fullScoreDetail": {"scoreOpp1": 0, "scoreOpp2": 1},
+  "statusLineStr": "Événement en cours"
 }"""
 
 
@@ -82,6 +105,47 @@ def test_decode_round_table_sorts_by_round_number():
     response = parse_statistic(raw)
     rounds = decode_round_table(response)
     assert [r.round_no for r in rounds] == [1, 2]
+
+
+def test_decode_period_table_from_the_real_ai_table_tennis_capture():
+    """Le set 1 est terminé (4:11) ; le set 2 est en cours (7:7, à égalité) et donc ignoré —
+    aucun set officiel ne se termine à égalité, contrairement à un set encore en jeu."""
+    response = parse_statistic(REAL_TABLE_TENNIS_RESPONSE)
+    sets = decode_period_table(response)
+    assert sets == [SetTableEntry(set_no=1, points1=4, points2=11, winner=2)]
+
+
+def test_decode_period_table_is_empty_when_no_set_is_finished_yet():
+    response = parse_statistic('{"periodScores": [{"period": 1, "scoreOpp1": 3, "scoreOpp2": 3}]}')
+    assert decode_period_table(response) == []
+
+
+def test_decode_period_table_is_empty_when_periodscores_is_entirely_absent():
+    """``statistic.main.RoundTable`` (Mortal Kombat) est totalement absent de la réponse AI Table
+    Tennis, et vice versa : chaque champ a une valeur par défaut sûre, jamais d'erreur de schéma."""
+    response = parse_statistic(REAL_RESPONSE)  # une capture Mortal Kombat, sans periodScores
+    assert decode_period_table(response) == []
+
+
+def test_decode_period_table_sorts_by_set_number():
+    response = parse_statistic(json.dumps({"periodScores": [
+        {"period": 2, "scoreOpp1": 11, "scoreOpp2": 5},
+        {"period": 1, "scoreOpp1": 4, "scoreOpp2": 11},
+    ]}))
+    sets = decode_period_table(response)
+    assert [s.set_no for s in sets] == [1, 2]
+
+
+async def test_fetch_statistic_accepts_a_decode_fn_for_another_sport():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=REAL_TABLE_TENNIS_RESPONSE)
+
+    inner = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://example.test")
+    client = HttpClient("https://example.test", "OddsCollector/1.0", rate_limiter=RateLimiter(1000), client=inner)
+
+    sets, _ = await fetch_statistic(client, 755424452, {"lng": "fr"}, decode_fn=decode_period_table)
+
+    assert sets == [SetTableEntry(set_no=1, points1=4, points2=11, winner=2)]
 
 
 async def test_fetch_statistic_calls_the_expected_endpoint_and_sorts_params():

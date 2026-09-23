@@ -23,7 +23,7 @@ from pydantic import ValidationError
 
 from ...transport.errors import ParserError
 from ...transport.http import HttpClient
-from .models import FullScoreDetail, Lenient
+from .models import FullScoreDetail, Lenient, PeriodScore
 
 log = logging.getLogger("collector.statistic")
 
@@ -42,6 +42,11 @@ class StatisticResponse(Lenient):
     fullScoreDetail: FullScoreDetail = FullScoreDetail()
     currentPeriodName: str | None = None
     statistic: StatisticBlock = StatisticBlock()
+    # Absent pour Mortal Kombat (tout est dans statistic.main.RoundTable) ; pour AI Table Tennis,
+    # c'est au contraire la SEULE source du détail par set — RoundTable n'existe pas du tout pour
+    # ce sport (découvert le 2026-09-23 : le fil de match restait silencieux sans jamais journaliser
+    # d'erreur, voir decode_period_table).
+    periodScores: list[PeriodScore] = []
 
 
 @dataclass(frozen=True)
@@ -52,6 +57,17 @@ class RoundTableEntry:
     finish_di: str | None
     wt: str | None
     fw: bool | None
+
+
+@dataclass(frozen=True)
+class SetTableEntry:
+    """Équivalent de ``RoundTableEntry`` pour AI Table Tennis : un set terminé, décodé depuis
+    ``periodScores`` (pas de type de finish ni de Mercy pour ce sport). ``winner`` est déjà un
+    index (1/2), pas un nom : ``periodScores`` ne donne que des scores, jamais de nom de joueur."""
+    set_no: int
+    points1: int
+    points2: int
+    winner: int  # 1 ou 2 ; jamais None ici (voir decode_period_table)
 
 
 def parse_statistic(raw_text: str) -> StatisticResponse:
@@ -94,9 +110,30 @@ def decode_round_table(response: StatisticResponse) -> list[RoundTableEntry]:
     return entries
 
 
-async def fetch_statistic(client: HttpClient, game_id: int, site_params: dict[str, object]) -> tuple[list[RoundTableEntry], int]:
-    """Appelle l'endpoint pour un match. Retourne (manches connues, latence en ms)."""
+def decode_period_table(response: StatisticResponse) -> list[SetTableEntry]:
+    """Décode ``periodScores`` en sets **terminés** uniquement, triés par numéro de set. Contrairement
+    à ``RoundTable`` (qui ne contient déjà que des manches terminées), ``periodScores`` inclut aussi
+    le set en cours — un set à score égal (ex. 7:7) est donc ignoré comme non terminé (aucun set
+    officiel ne se termine à égalité), même tolérance que ``results.parse_table_tennis_score``."""
+    entries: list[SetTableEntry] = []
+    for p in response.periodScores:
+        if p.scoreOpp1 == p.scoreOpp2:
+            continue  # set en cours (ou anomalie) : pas encore terminé, ignoré pour l'instant
+        winner = 1 if p.scoreOpp1 > p.scoreOpp2 else 2
+        entries.append(SetTableEntry(set_no=p.period, points1=p.scoreOpp1, points2=p.scoreOpp2, winner=winner))
+    entries.sort(key=lambda e: e.set_no)
+    return entries
+
+
+async def fetch_statistic(client: HttpClient, game_id: int, site_params: dict[str, object], *,
+                           decode_fn=decode_round_table) -> tuple[list, int]:
+    """Appelle l'endpoint pour un match. Retourne (manches/sets connus, latence en ms).
+
+    ``decode_fn`` rend cette fonction réutilisable pour n'importe quel sport (passer
+    ``decode_period_table`` pour AI Table Tennis), même principe que ``parse_fn`` dans
+    ``results.py`` : la requête HTTP et la validation du schéma commun ne changent jamais, seul le
+    décodage du détail par manche/set diffère d'un sport à l'autre."""
     params = {"gameId": game_id, **site_params}
     result = await client.get(ENDPOINT, params)
     response = parse_statistic(result.body)
-    return decode_round_table(response), result.latency_ms
+    return decode_fn(response), result.latency_ms

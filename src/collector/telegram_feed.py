@@ -205,6 +205,41 @@ def format_match_message(opp1_name: str, opp2_name: str, rounds, *, league_name:
     return "\n".join(lines)
 
 
+def format_table_tennis_message(opp1_name: str, opp2_name: str, sets, *, league_name: str,
+                                 match_no_of_day: int | None = None, match_date=None,
+                                 match_finished: bool = False) -> str:
+    """Équivalent de ``format_match_message`` pour AI Table Tennis : pas de type de finish ni de
+    Mercy pour ce sport, juste le score de chaque set. ``match_finished`` est fourni explicitement
+    par l'appelant (``currentPeriodName == "Jeu terminé"``) plutôt que déduit d'un seuil de manches
+    gagnantes : contrairement à Mortal Kombat (toujours en 9 manches maximum), le nombre de sets
+    gagnants d'AI Table Tennis varie selon le format du match (« 3 sets Match », etc.)."""
+    lines = [f"🎮 {league_name.upper()}"]
+    date_str = match_date.strftime("%d-%m-%Y") if match_date is not None else None
+    if match_no_of_day is not None and date_str is not None:
+        lines.append(f"📅 Match n°{match_no_of_day} — Journée du {date_str}")
+    elif match_no_of_day is not None:
+        lines.append(f"📅 Match n°{match_no_of_day}")
+    elif date_str is not None:
+        lines.append(f"📅 Journée du {date_str}")
+    lines.append(f"🏓 {opp1_name} VS {opp2_name}")
+    lines.append("")
+
+    tally1 = tally2 = 0
+    for s in sets:
+        vainqueur = opp1_name if s.winner == 1 else opp2_name
+        if s.winner == 1:
+            tally1 += 1
+        else:
+            tally2 += 1
+        lines.append(f"🏓 Set {s.set_no} : {s.points1}-{s.points2} — Vainqueur {vainqueur} "
+                     f"[Score de sets : {tally1}-{tally2}]")
+
+    if match_finished and sets:
+        vainqueur = opp1_name if tally1 > tally2 else opp2_name
+        lines.append(f"🏆 VAINQUEUR DU MATCH : {vainqueur} ({tally1}-{tally2})")
+    return "\n".join(lines)
+
+
 def format_pre_match_caption(opp1_name: str, opp2_name: str, seconds_remaining: int | None) -> str:
     """Légende de l'annonce pré-match. ``seconds_remaining is None`` signale que le match a
     démarré (dernière édition, voir pre_match.py) — jamais un temps négatif affiché."""

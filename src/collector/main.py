@@ -75,6 +75,7 @@ async def amain() -> int:
         live_feed = LiveFeedProcessor(
             http=http, site_params=settings.site_params,
             sender=feed_sender, chat_ids=match_feed_config.chat_ids,
+            league_sport_ids=league_sport_ids,
         )
         pre_match = PreMatchAnnouncer(sender=feed_sender, chat_ids=match_feed_config.chat_ids)
         log.info("fil de match en direct activé (Telegram) pour %d ligue(s) : %s",

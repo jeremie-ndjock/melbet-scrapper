@@ -9,12 +9,14 @@ import httpx
 import pytest
 
 from collector.sources.v3.statistic import RoundTableEntry
+from collector.sources.v3.statistic import SetTableEntry
 from collector.telegram_feed import (
     CHAT_ID_ENV_PREFIX,
     MatchFeedConfig,
     MatchFeedSender,
     format_match_message,
     format_pre_match_caption,
+    format_table_tennis_message,
     load_match_feed_config_from_env,
 )
 
@@ -109,6 +111,33 @@ def test_format_message_omits_the_date_and_number_lines_when_not_given():
     lines = text.splitlines()
     assert lines[0] == "🎮 MORTAL KOMBAT X"
     assert lines[1] == "🥊 Goro VS Ermac"  # pas de ligne "📅" : ni numéro ni date fournis
+
+
+def test_format_table_tennis_message_matches_the_approved_style():
+    import datetime
+    sets = [
+        SetTableEntry(set_no=1, points1=4, points2=11, winner=2),
+        SetTableEntry(set_no=2, points1=11, points2=7, winner=1),
+    ]
+    text = format_table_tennis_message("Truls Moregard", "Felix Lebrun", sets,
+                                        league_name="AI Table Tennis Prague",
+                                        match_no_of_day=3, match_date=datetime.date(2026, 9, 23))
+    assert text.splitlines() == [
+        "🎮 AI TABLE TENNIS PRAGUE",
+        "📅 Match n°3 — Journée du 23-09-2026",
+        "🏓 Truls Moregard VS Felix Lebrun",
+        "",
+        "🏓 Set 1 : 4-11 — Vainqueur Felix Lebrun [Score de sets : 0-1]",
+        "🏓 Set 2 : 11-7 — Vainqueur Truls Moregard [Score de sets : 1-1]",
+    ]
+
+
+def test_format_table_tennis_message_announces_the_winner_only_when_finished():
+    sets = [SetTableEntry(set_no=1, points1=11, points2=4, winner=1), SetTableEntry(set_no=2, points1=11, points2=7, winner=1)]
+    unfinished = format_table_tennis_message("A", "B", sets, league_name="x", match_finished=False)
+    finished = format_table_tennis_message("A", "B", sets, league_name="x", match_finished=True)
+    assert "🏆" not in unfinished
+    assert "🏆 VAINQUEUR DU MATCH : A (2-0)" in finished
 
 
 def test_format_message_tolerates_an_unknown_winner_name(caplog):

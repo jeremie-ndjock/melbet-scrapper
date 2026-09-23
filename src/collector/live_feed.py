@@ -26,13 +26,20 @@ from datetime import datetime, timezone
 import asyncpg
 
 from .sources.v3.models import Game
-from .sources.v3.statistic import RoundTableEntry, fetch_statistic
+from .sources.v3.statistic import RoundTableEntry, SetTableEntry, decode_period_table, decode_round_table, fetch_statistic
 from .storage import queries
-from .telegram_feed import MatchFeedSender, format_match_message
+from .telegram_feed import MatchFeedSender, format_match_message, format_table_tennis_message
 from .transport.errors import BlockedError, ParserError, ServerError
 from .transport.http import HttpClient
 
 log = logging.getLogger("collector.live_feed")
+
+# sportId AI Table Tennis (10) -> décodage par set (periodScores) au lieu du tableau de manches
+# (RoundTable, inexistant pour ce sport — voir statistic.py). Un sport non listé garde le décodage
+# Mortal Kombat par défaut, jamais de plantage sur un sport futur non encore géré (même principe
+# que ``results._RESULT_PARSER_BY_SPORT``).
+_LIVE_DECODER_BY_SPORT = {10: decode_period_table}
+_DEFAULT_LIVE_DECODER = decode_round_table
 
 
 def _winner_index(winner_name: str, game: Game) -> int | None:
@@ -45,11 +52,12 @@ def _winner_index(winner_name: str, game: Game) -> int | None:
 
 class LiveFeedProcessor:
     def __init__(self, http: HttpClient, site_params: dict[str, object], sender: MatchFeedSender,
-                 chat_ids: dict[int, str]):
+                 chat_ids: dict[int, str], league_sport_ids: dict[int, int] | None = None):
         self.http = http
         self.site_params = site_params
         self.sender = sender
         self.chat_ids = chat_ids
+        self.league_sport_ids = league_sport_ids or {}
 
     async def process_games(self, conn: asyncpg.Connection, games: list[Game], *,
                              league_id: int, league_name: str) -> None:
@@ -90,11 +98,13 @@ class LiveFeedProcessor:
         if rounds_played <= last_notified and (already_finished or not is_now_finished):
             return
 
-        rounds, _ = await fetch_statistic(self.http, game.id, self.site_params)
+        sport_id = self.league_sport_ids.get(league_id)
+        decode_fn = _LIVE_DECODER_BY_SPORT.get(sport_id, _DEFAULT_LIVE_DECODER)
+        rounds, _ = await fetch_statistic(self.http, game.id, self.site_params, decode_fn=decode_fn)
         if len(rounds) < rounds_played:
-            return  # le tableau des rounds n'a pas encore rattrapé le score : on réessaiera au prochain cycle
+            return  # le tableau des rounds/sets n'a pas encore rattrapé le score : on réessaiera au prochain cycle
         if len(rounds) <= last_notified and not (is_now_finished and not already_finished):
-            return  # rien de neuf non plus une fois le tableau des rounds effectivement consulté
+            return  # rien de neuf non plus une fois le tableau effectivement consulté
 
         await self._complete_round_results(conn, game, rounds)
 
@@ -105,8 +115,15 @@ class LiveFeedProcessor:
             match_no = existing["match_no_of_day"]  # figé au premier calcul, jamais recalculé
 
         match_date = datetime.fromtimestamp(game.startTs, tz=timezone.utc).date()
-        text = format_match_message(game.opponent1.display_name, game.opponent2.display_name, rounds,
-                                     league_name=league_name, match_no_of_day=match_no, match_date=match_date)
+        if decode_fn is decode_period_table:
+            text = format_table_tennis_message(
+                game.opponent1.display_name, game.opponent2.display_name, rounds,
+                league_name=league_name, match_no_of_day=match_no, match_date=match_date,
+                match_finished=is_now_finished,
+            )
+        else:
+            text = format_match_message(game.opponent1.display_name, game.opponent2.display_name, rounds,
+                                         league_name=league_name, match_no_of_day=match_no, match_date=match_date)
         message_id = existing["message_id"] if existing else None
         new_message_id = await self.sender.send_or_edit(chat_id, message_id, text)
         if new_message_id is None:
@@ -115,10 +132,13 @@ class LiveFeedProcessor:
         await conn.execute(queries.UPDATE_MATCH_FEED, game.id, new_message_id, len(rounds), is_now_finished)
 
     @staticmethod
-    async def _complete_round_results(conn: asyncpg.Connection, game: Game, rounds: list[RoundTableEntry]) -> None:
-        args = [
-            (game.id, r.round_no, _winner_index(r.winner_name, game), r.seconds, r.finish_di,
-             None, r.wt, r.fw, None, None)
-            for r in rounds
-        ]
+    async def _complete_round_results(conn: asyncpg.Connection, game: Game, rounds) -> None:
+        if rounds and isinstance(rounds[0], SetTableEntry):
+            args = [(game.id, s.set_no, s.winner, None, None, None, None, None, None, None) for s in rounds]
+        else:
+            args = [
+                (game.id, r.round_no, _winner_index(r.winner_name, game), r.seconds, r.finish_di,
+                 None, r.wt, r.fw, None, None)
+                for r in rounds
+            ]
         await conn.executemany(queries.UPSERT_ROUND_RESULT, args)

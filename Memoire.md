@@ -1624,3 +1624,51 @@ rattrapés pour Prague, 4106 pour Goa. Confirmé aussi que la collecte des cotes
 sur les deux nouvelles ligues (2 événements déjà vus) et que le fil de match Telegram s'engage
 correctement (un appel `v3/statistic` déclenché sur un match AI Table Tennis en cours, signe que la
 détection de nouvelle manche fonctionne sur ce sport comme sur Mortal Kombat).
+
+## 31. Vrai défaut de production trouvé : le fil de match Telegram restait muet sur AI Table Tennis (2026-09-23)
+
+Signalé par l'utilisateur : aucun message n'était arrivé dans les deux salons Telegram AI Table
+Tennis, alors que l'étape 30 semblait tout confirmer (y compris un appel `v3/statistic` réussi).
+Un appel réussi n'est pas la même chose qu'un contenu exploitable — creusé en comparant directement
+la vraie réponse `v3/statistic` pour un match Mortal Kombat et pour un match AI Table Tennis :
+
+```
+Mortal Kombat :    {"fullScoreDetail": {...}, "statistic": {"main": {"RoundTable": "[...]"}}}
+AI Table Tennis :  {"fullScoreDetail": {...}, "periodScores": [{"period":1,...}, ...]}
+```
+
+Le champ `statistic.main.RoundTable`, seule source lue par `live_feed.py`/`statistic.py` pour
+détecter une manche terminée, **n'existe tout simplement pas** pour ce sport — le site expose le
+détail des sets via `periodScores` (racine de la réponse), une structure entièrement différente.
+Conséquence : `decode_round_table` renvoie toujours une liste vide pour AI Table Tennis (le champ
+absent retombe sur sa valeur par défaut, pas d'erreur de schéma), donc `len(rounds) < rounds_played`
+est toujours vrai, et `_process_one` retourne silencieusement à chaque cycle, pour chaque match,
+indéfiniment — jamais un crash, jamais une ligne de journal, juste un silence total. Contrairement
+au parseur de résultats officiels (`results.py`, étape 29), le fil de match en direct n'avait
+**jamais été rendu générique par sport** : un vrai trou laissé par le travail précédent.
+
+**Corrigé en généralisant `live_feed.py`/`statistic.py`, même principe que `results.py`** :
+- `statistic.py` : nouveau champ `StatisticResponse.periodScores` (réutilise le modèle `PeriodScore`
+  déjà défini pour `gamesByChamp`), nouvelle fonction `decode_period_table` qui décode les sets
+  **terminés uniquement** (un set à égalité, ex. 7:7, est un set encore en cours — aucun set
+  officiel ne se termine à égalité, même tolérance que `parse_table_tennis_score`), et
+  `fetch_statistic` accepte désormais un `decode_fn` (défaut `decode_round_table`, comme `parse_fn`
+  dans `results.py`).
+- `live_feed.py` : `LiveFeedProcessor` reçoit `league_sport_ids` et choisit le bon `decode_fn` par
+  sport (`{10: decode_period_table}`, défaut Mortal Kombat pour tout sport non listé — jamais de
+  plantage). `_complete_round_results` distingue les deux types d'entrée (`SetTableEntry` a déjà un
+  vainqueur sous forme d'index, pas de nom à comparer comme pour Mortal Kombat).
+- `telegram_feed.py` : nouvelle fonction `format_table_tennis_message` (score de chaque set, pas de
+  type de finish ni de Mercy pour ce sport). Décision prise avec l'utilisateur sur le format : score
+  du set + score de sets cumulé par ligne (ex. « Set 1 : 4-11 — Vainqueur Felix Lebrun [Score de
+  sets : 0-1] »), plutôt qu'un message ne montrant que l'état courant.
+
+**Résultat des tests** : 278 tests (+11 : décodage de `periodScores`, format du message, fil de
+match complet pour AI Table Tennis y compris le cas d'un set en cours confondu avec un set terminé,
+et un test de non-régression confirmant qu'une ligue sans correspondance de sport garde le
+comportement Mortal Kombat par défaut), deux exécutions indépendantes stables.
+
+**Déployé et vérifié en conditions réelles sur le VPS** (accès SSH toujours actif pour cette
+session) : `git pull`, image reconstruite, conteneur `scraper` recréé. Reste à confirmer par
+l'utilisateur : réception effective d'un message dans les deux salons Telegram AI Table Tennis lors
+de la prochaine manche terminée en direct.
