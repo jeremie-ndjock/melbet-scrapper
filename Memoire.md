@@ -1609,6 +1609,18 @@ machinerie de rattrapage/réconciliation ont déjà été vérifiés contre le v
 résultats Prague, 268 Goa, écrits correctement). Ce commit ne change que la configuration qui
 détermine quelles ligues sont scrutées en continu — aucun code de collecte n'est modifié.
 
-**Reste à faire, hors de ce dépôt** : déployer ce changement sur le VPS de production (`git pull` +
-redémarrage du service `scraper`) pour que l'activation prenne effet réellement en continu — étape
-manuelle, à confirmer séparément avec l'utilisateur avant de la déclencher.
+**Déployé et vérifié en production sur le VPS le jour même** (accès SSH fourni explicitement par
+l'utilisateur pour cette étape) : `.env` du VPS complété avec les deux salons Telegram manquants
+(`TELEGRAM_MATCH_CHAT_ID_3066896`, `TELEGRAM_MATCH_CHAT_ID_3066897` — absents jusque-là, une
+sauvegarde horodatée du `.env` a été prise avant modification), `git pull` (le VPS était resté sur
+un commit ancien, `f573f7c`, en retard de 5 commits), image reconstruite (`config/leagues.yaml`
+est copié dans l'image Docker au build, un simple redémarrage n'aurait pas suffi), conteneur
+`scraper` recréé.
+
+Confirmé par les vrais journaux du conteneur : migrations 009/010 appliquées, démarrage avec
+« 4 ligue(s) », requêtes `sportIds=10` correctement envoyées pour Prague et Goa, conteneur
+`healthy`. Confirmé directement en base réelle quelques secondes plus tard : 4094 résultats déjà
+rattrapés pour Prague, 4106 pour Goa. Confirmé aussi que la collecte des cotes en direct fonctionne
+sur les deux nouvelles ligues (2 événements déjà vus) et que le fil de match Telegram s'engage
+correctement (un appel `v3/statistic` déclenché sur un match AI Table Tennis en cours, signe que la
+détection de nouvelle manche fonctionne sur ce sport comme sur Mortal Kombat).
