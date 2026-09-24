@@ -98,7 +98,7 @@ const doc = new Document({
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
         children: [new TextRun({ text: "Préparé pour Jeremie Ndjock", size: 20, font: FONT })] }),
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 40 },
-        children: [new TextRun({ text: "22 septembre 2026", size: 20, font: FONT })] }),
+        children: [new TextRun({ text: "22 septembre 2026 — mis à jour le 24 septembre 2026", size: 20, font: FONT })] }),
       new Paragraph({ children: [new PageBreak()] }),
 
       // ---------------------------------------------------------------- sommaire
@@ -259,6 +259,18 @@ const doc = new Document({
       Bullet("Matrice de confusion et rappel PAR CLASSE — l'exactitude globale (accuracy) est trompeuse ici : un modèle qui prédit toujours Regular ou Fatality aura une exactitude élevée tout en étant inutile sur les classes rares"),
       Bullet("Comparaison au marché « Mode de Victoire » (groupe 1066) sur le sous-ensemble de classes qu'il couvre (Fatality/Brutality/No Finish)"),
 
+      H2("8.3 Repères mesurés sur le marché (24 septembre 2026)"),
+      P("Mesuré sur ≈ 8 600 manches réelles (22 au 24 septembre), marché « Victoire dans le Round » (groupe 1050), cote de clôture de chaque manche :"),
+      table([3600, 2500, 2500], [
+        ["Repère", "Mortal Kombat X", "Mortal Kombat 3"],
+        ["Marge moyenne du bookmaker", "3,4 %", "7,6 %"],
+        ["Le favori gagne réellement", "60,0 % des manches", "59,6 % des manches"],
+        ["Probabilité implicite du favori (marge retirée)", "59,2 %", "59,0 %"],
+        ["Cote médiane du favori / de l'outsider", "1,69 / 2,28", "1,62 / 2,18"],
+      ]),
+      Note("Le marché est déjà bien calibré : suivre simplement le favori n'apporte aucun avantage. Un modèle n'a de valeur que s'il fait mieux que cette probabilité implicite, marge comprise. Un backtest de la martingale (mises 1000/2000/4000/8000 F) sur ces mêmes données a perdu dans les 12 variantes testées (−1 % à −14 % des sommes misées) : aucun système de mise ne crée d'avantage à lui seul."),
+      P("Taille d'échantillon nécessaire pour valider un avantage : avec une cote autour de 1,7, l'écart-type du rendement d'un pari est d'environ 0,83. Distinguer un avantage réel de 3 % d'un coup de chance demande donc de l'ordre de 3 000 à 7 000 paris simulés hors entraînement — soit 1 à 3 semaines supplémentaires de validation, le modèle ne pariant que sur une partie des manches."),
+
       // ================================================================ 9. VALIDATION
       H1("9. Protocole de validation (walk-forward)"),
       P("Plutôt qu'un unique découpage entraînement/test figé, valider en avançant dans le temps, à mesure que les données s'accumulent :"),
@@ -275,15 +287,36 @@ const doc = new Document({
         ["2", "Jour 3 à 7", "Extraction du premier jeu de données (section 6), modèle baseline sur les variables génériques (4.1), première comparaison au marché (8)"],
         ["3", "Semaine 2 à 3", "Ajout des variables par combattant individuel ; réentraînement ; premier bilan de calibration"],
         ["4", "Semaine 4 à 8", "Ajout des variables de matchup (paire de combattants) si le volume le permet ; regroupement des classes rares MK3 si nécessaire (7.2)"],
-        ["5", "Continu ensuite", "Réentraînement hebdomadaire ; validation walk-forward (9) ; surveillance de la dérive par rapport au marché"],
+        ["5", "Après validation d'un avantage", "Prédictions en direct sur un salon Telegram dédié (11), réentraînement encore manuel"],
+        ["6", "Continu ensuite", "Réentraînement et redéploiement automatiques quotidiens, avec examen de passage champion/challenger (12) ; surveillance de la dérive par rapport au marché"],
       ]),
+      Note("Calendrier réaliste d'un modèle fiable, s'il existe un signal exploitable : premier verdict vers le 25 septembre 2026 (J+3), modèle complet vers fin octobre - mi-novembre, plus 1 à 3 semaines de validation hors entraînement avant de s'y fier. Il est possible que l'étude conclue à l'absence d'avantage exploitable : ce serait un résultat à part entière."),
 
       // ================================================================ 11. INTÉGRATION
       H1("11. Intégration temps réel (aperçu — phase ultérieure)"),
       P("Hors périmètre d'entraînement proprement dit, mais pour situer la suite : une fois un modèle validé, son intégration au collecteur existant suivrait le même principe que le fil de match Telegram déjà en production (voir Memoire.md, section 23) — un nouveau module consommant les mêmes données en direct (round_results, odds_snapshots), calculant les variables à la volée, interrogeant le modèle, et publiant la prédiction (par exemple en complément du message de manche déjà envoyé). Ce module ne fait pas partie du présent plan d'entraînement et sera précisé séparément le moment venu."),
 
-      // ================================================================ 12. RISQUES
-      H1("12. Risques et limites"),
+      // ================================================================ 12. AUTOMATISATION
+      H1("12. Réentraînement et redéploiement automatiques quotidiens"),
+      P("Décidé avec l'utilisateur le 24 septembre 2026. À mettre en place uniquement APRÈS un premier modèle ayant démontré un avantage sur le marché (phase 6 du calendrier) : automatiser le redéploiement d'un modèle qui ne bat pas la cote n'aurait aucun intérêt."),
+      Note("Principe non négociable : un nouveau modèle ne remplace JAMAIS automatiquement le modèle en place sans avoir réussi un examen de passage. Un entraînement peut mal tourner (données anormales un jour donné, bug, changement du simulateur) ; un redéploiement aveugle mettrait en production un modèle pire sans que personne ne s'en aperçoive."),
+
+      H2("12.1 Déroulement quotidien (champion contre challenger)"),
+      Bullet("Chaque jour à heure fixe (ex. 4h00 UTC, après la sauvegarde de 3h00), une tâche cron lance l'entraînement dans un conteneur séparé (profil Docker dédié), jamais dans le conteneur du collecteur."),
+      Bullet("Extraction des données à jour (section 6), entraînement d'un nouveau modèle : le « challenger »."),
+      Bullet("Examen de passage, sur les 1 à 2 derniers jours qu'aucun des deux modèles n'a vus : le challenger doit faire au moins aussi bien que le modèle en place (le « champion »), faire mieux que la probabilité implicite du marché, et réussir les contrôles de cohérence (volume minimal de données, calibration correcte, aucune valeur aberrante)."),
+      Bullet("Examen réussi : le modèle est enregistré avec sa date et ses métriques, puis désigné comme modèle actif. Le collecteur le charge seul au match suivant, sans redémarrage ni coupure de service."),
+      Bullet("Examen échoué : le champion reste en place, rien ne change en production."),
+      Bullet("Dans les deux cas, un message sur le canal d'alertes techniques (ex. « Nouveau modèle déployé : log-loss 0,672 → 0,668 » ou « Modèle du jour rejeté, ancien conservé »)."),
+
+      H2("12.2 Sécurités"),
+      Bullet("Historique des versions : les derniers modèles sont conservés ; retour en arrière en une commande, ou automatiquement si la performance réelle se dégrade."),
+      Bullet("Suivi en production : chaque prédiction est enregistrée en base puis comparée au résultat réel ; alerte si le modèle en place perd face au marché plusieurs jours de suite."),
+      Bullet("Isolation : conteneur d'entraînement avec limite de mémoire, incapable de priver Postgres ou le collecteur de ressources. S'il échoue, la production continue avec le modèle actuel : elle n'est jamais laissée sans modèle."),
+      Bullet("Coût : quelques minutes de calcul par jour, largement supporté par le VPS actuel (8 Go, ≈ 580 Mo utilisés). Sur une instance à 1 Go, l'entraînement devrait se faire ailleurs."),
+
+      // ================================================================ 13. RISQUES
+      H1("13. Risques et limites"),
       Bullet("Nature simulée du jeu : plancher d'aléa irréductible, déjà signalé en section 1.3 — à rappeler dans toute présentation des résultats pour ne pas sur-promettre."),
       Bullet("Déséquilibre extrême des classes rares côté MK3 (Hara-Kiri, Animality) : un modèle entraîné trop tôt sur trop peu d'exemples de ces classes donnera des probabilités non fiables sur elles, même si le reste du modèle est bon."),
       Bullet("Dérive possible si le fournisseur du jeu modifie son générateur (nouveaux personnages, rééquilibrage) : le protocole walk-forward (section 9) est la principale protection, à ne jamais sauter une fois le modèle en production."),

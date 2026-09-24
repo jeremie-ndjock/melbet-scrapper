@@ -1825,3 +1825,84 @@ correctifs, confirmé par l'utilisateur.
   du plan (`docs/forecasting/plan_entrainement_mortal_kombat.docx`, section 6).
 - IP Elastic toujours non allouée sur le VPS ; alerte de budget AWS toujours non confirmée comme
   configurée (reportés depuis les clôtures précédentes, jamais retranchés ni traités).
+
+## 35. Stratégie de mise, cotes collectées et automatisation du modèle (2026-09-24)
+
+### Backtest de la martingale sur les vraies données
+
+L'utilisateur a demandé un avis sur une stratégie de mise : 1000 F sur la manche 1, puis mise
+doublée après chaque perte (2000, 4000, 8000 F), jusqu'à 4 manches. C'est la **martingale**.
+Plutôt qu'une réponse théorique seule, backtest sur les vraies données de production
+(≈ 8 600 manches du 22 au 24 septembre, script ponctuel dans le dossier temporaire de la session,
+non versionné) :
+
+- **Marché utilisé** : « Victoire dans le Round » (`g=1050`, `t=2140` V1 / `t=2141` V2). Vérifié
+  avant de coder sur un vrai match : la cote de la manche N est publiée pendant la manche N−1 et se
+  ferme au début de la manche N. Il reste donc bien une fenêtre pour miser après avoir vu la défaite
+  précédente, et la cote bouge à peine dans cette fenêtre : prendre la dernière cote avant
+  fermeture n'introduit aucune fuite d'information.
+- **12 variantes testées** : 2 ligues × 2 lectures (un cycle par match sur les manches 1 à 4 ; ou
+  une mise sur chaque manche en continu) × 3 choix de combattant (favori, outsider, joueur 1).
+  **Les 12 perdent**, de −1 % à −14 % des sommes misées. Exemple : favori, un cycle par match, MKX :
+  97 % des cycles gagnés mais −105 182 F au total, avec un creux de 141 209 F à absorber.
+- **Pourquoi** : la cote médiane du favori est de 1,69 (MKX) et 1,62 (MK3), pas 2,00. Doubler ne
+  suffit donc pas : même un gain à la manche 3 ou 4 laisse le cycle en perte. Surtout, le marché est
+  bien calibré (le favori gagne 60,0 % des manches MKX pour 59,2 % de probabilité implicite, marge
+  retirée ; 59,6 % contre 59,0 % pour MK3), et la marge est de **3,4 % sur MKX et 7,6 % sur MK3**
+  (parier sur MK3 coûte deux fois plus cher).
+- **Conclusion transmise à l'utilisateur** : aucun système de mise ne crée d'avantage à lui seul ;
+  seule une prédiction meilleure que la cote peut en créer un. Ces repères ont été ajoutés au plan
+  d'entraînement (section 8.3).
+
+### Cotes collectées (question de l'utilisateur)
+
+Vérifié en base plutôt que de mémoire : le collecteur enregistre chaque **changement** de cote des
+matchs à venir et en cours des 4 ligues (heure serveur, ligne, numéro de manche/set, suspension
+`blocked`, disparition du marché). Mortal Kombat : 1x2, victoire dans la manche, totaux de manches,
+mode de victoire, Fatality, Flawless, durée de manche (MKX seulement), Mercy et totaux de
+Babality/Animality/Hara-Kiri (MK3 seulement). AI Table Tennis : 1x2 et total au niveau du match,
+et au niveau de chaque set handicap, totaux, score exact, écart de points, premier à N points,
+pair/impair, prolongations.
+
+L'utilisateur a remarqué que les cotes du site clignotent en rouge ou en vert. La couleur n'est
+pas stockée, mais le sens du mouvement se recalcule exactement à partir des valeurs successives
+(montré sur un vrai match AI Table Tennis : changements toutes les 10 à 15 s en direct). Limite
+assumée : relevé toutes les ~5 s, donc plusieurs changements en moins de 5 s ne laissent que le
+dernier, et une suspension très brève peut passer inaperçue. Ces mouvements (tendance, nombre de
+changements, suspensions) pourront servir de variables au modèle, uniquement ceux antérieurs au
+moment de la prédiction.
+
+### Calendrier réaliste d'un modèle « performant »
+
+Question de l'utilisateur : à partir de combien de jours un modèle « ultra performant » ? Réponse
+franche : rien ne garantit un modèle performant sur un jeu simulé déjà bien coté par le marché. Le
+seul critère de succès est de battre la probabilité implicite de la cote, marge comprise ; il est
+possible que l'étude conclue à l'absence d'avantage exploitable. Calendrier : premier verdict
+vers le 25 septembre (J+3), modèle complet vers fin octobre - mi-novembre, puis 1 à 3 semaines de
+validation hors entraînement (distinguer un avantage de 3 % d'un coup de chance demande de l'ordre
+de 3 000 à 7 000 paris simulés, avec un écart-type d'environ 0,83 par pari à une cote de 1,7).
+Entraînement et prédiction en direct tiennent sans difficulté sur le VPS actuel (LightGBM sur
+quelques dizaines de milliers de manches : quelques secondes à quelques minutes).
+
+### Décision : réentraînement et redéploiement automatiques quotidiens
+
+Demandé par l'utilisateur : une fois le premier modèle en place, le réentraîner seul chaque jour à
+heure fixe et redéployer seul le nouveau modèle en production. Accepté, avec un principe non
+négociable : **jamais de remplacement sans examen de passage**.
+
+- `cron` quotidien (ex. 4h00 UTC, après la sauvegarde de 3h00), entraînement dans un conteneur
+  séparé (profil Docker dédié, limite de mémoire), jamais dans le conteneur du collecteur.
+- Le nouveau modèle (« challenger ») doit, sur les 1 à 2 derniers jours non vus, faire au moins
+  aussi bien que le modèle en place (« champion »), battre le marché et passer les contrôles de
+  cohérence. Sinon, le champion reste en place.
+- Modèles versionnés (date + métriques), retour en arrière en une commande ou automatique si la
+  performance réelle se dégrade. Chaque prédiction enregistrée en base et comparée au résultat réel.
+- Rechargement du nouveau modèle par le collecteur au match suivant, sans redémarrage.
+- Message sur le canal d'alertes techniques à chaque décision (déployé ou rejeté).
+- **Ordre retenu** : premier modèle et verdict ; si un avantage est démontré, prédictions en
+  direct sur un salon Telegram dédié avec entraînement manuel ; puis seulement l'automatisation
+  quotidienne. Rien de tout cela n'est encore implémenté.
+
+Plan d'entraînement mis à jour en conséquence (`docs/forecasting/generate.js`, document régénéré) :
+nouvelle section 8.3 (repères mesurés sur le marché), calendrier (section 10) complété des phases
+5 et 6, nouvelle section 12 (réentraînement automatique), « Risques et limites » renumérotée 13.
