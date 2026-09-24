@@ -1966,3 +1966,29 @@ uniquement, requête d'export SQL incluse dans chaque docstring), vérifiés com
 exactement les chiffres ci-dessus et en section 35. 17 tests unitaires de leur logique de calcul
 (`tests/unit/test_backtest_martingale.py`), dont un qui fige le point central de l'explication :
 à 1,69, gagner la 4e manche laisse quand même le cycle à −1 480 F.
+
+## 37. Plan d'entraînement enrichi à partir de la littérature (2026-09-24)
+
+L'utilisateur a partagé des conseils de « feature engineering » et une liste d'articles, en
+demandant de s'en inspirer. Pages lues (ResearchGate inaccessible en lecture automatique, 403 ;
+même article que Bath/arXiv) et tri fait entre ce qui est solide et ce qui ne l'est pas :
+
+- **Walsh & Joshi (Bath), arXiv:2303.06021 v4, Machine Learning with Applications 2024** : choisir
+  le modèle sur sa calibration rapporte +34,69 % contre −35,17 % sur sa précision (NBA, une saison).
+  **Les chiffres « 110 % contre 2,9 % » cités à l'utilisateur viennent de la v1 (2023), révisée
+  depuis.** Retenu : classwise-ECE (20 intervalles, ≥ 80 % non vides), value bets, mise fixe avant
+  Kelly 1/8 (Kelly avec un modèle mal calibré : −75,9 %). Nuance consignée : sur nos jeux, le marché
+  est déjà calibré, la calibration est nécessaire mais pas suffisante.
+- **XGBoost en direct (Bristol), arXiv:2401.06086** : données entièrement simulées, les auteurs
+  déconseillent tout pari réel. Seule idée retenue : état du jeu + état du marché comme variables.
+- **López de Prado** : validation purgée avec embargo et prise en compte du nombre d'essais retenues ;
+  Triple-Barrier Labels non retenus (conçus pour des séries boursières continues).
+- **Conseils de feature engineering** : probabilité implicite (mais marge retirée, pas 1/cote brut),
+  marge, changements de ligne, mouvements de cote retenus ; « cycle de compensation » et séries des
+  3/6/12 dernières heures gardés seulement comme hypothèse à tester (même logique que la martingale,
+  contredite par les 50,7 %/49,7 % de répétition mesurés sur les sets AI Table Tennis).
+
+Plan régénéré (`docs/forecasting/generate.js`) : sections 4.4 (variables dynamiques du marché) et
+4.5 (séries récentes, « à valider »), anti-fuite renumérotée 4.6, 7.3 (critère de sélection par
+calibration), 8.4 (règle de pari et de mise), purge/embargo et registre des essais en section 9,
+ECE ajouté à l'examen de passage quotidien (12.1), annexe de références.

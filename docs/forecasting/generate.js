@@ -161,7 +161,7 @@ const doc = new Document({
       Bullet("round_no — le numéro de la manche en cours (une manche 1 ne se joue pas comme une manche décisive)"),
       Bullet("score1_avant / score2_avant — nombre de manches déjà gagnées par chaque combattant avant celle-ci (situation de match point ou non)"),
       Bullet("p1_name / p2_name — identité des deux combattants (encodage catégoriel : one-hot pour un premier modèle, cible-encodage ou embeddings si le volume le permet ensuite)"),
-      Bullet("Historique glissant par combattant (calculé UNIQUEMENT sur les matchs antérieurs à l'instant de la prédiction, jamais sur le match en cours — voir 4.4) : durée moyenne de ses manches, répartition de ses types de finish, nombre de matchs déjà observés"),
+      Bullet("Historique glissant par combattant (calculé UNIQUEMENT sur les matchs antérieurs à l'instant de la prédiction, jamais sur le match en cours — voir 4.6) : durée moyenne de ses manches, répartition de ses types de finish, nombre de matchs déjà observés"),
       Bullet("Heure / jour de la semaine du match, à titre exploratoire (utile seulement si le fournisseur fait varier ses paramètres selon le moment — à vérifier empiriquement, pas supposé a priori)"),
 
       H2("4.2 Variables spécifiques au modèle Mortal Kombat X (durée)"),
@@ -174,7 +174,19 @@ const doc = new Document({
       Bullet("Type de finish des manches précédentes du même match (un combattant qui vient d'enchaîner deux Fatality a peut-être une dynamique différente)"),
       Bullet("Répartition historique des types de finish par combattant ET par la paire de combattants (matchup) si le volume le permet (section 5)"),
 
-      H2("4.4 Règle impérative anti-fuite (data leakage)"),
+      H2("4.4 Variables dynamiques du marché (ajoutées le 24 septembre 2026)"),
+      P("Le collecteur enregistre chaque changement de cote (heure serveur, ligne, suspension, disparition du marché), relevé toutes les ≈ 5 s. On peut en tirer, pour chaque manche, calculé uniquement sur la période AVANT la prédiction :"),
+      Bullet("Probabilité implicite de chaque issue, marge retirée : (1/cote_i) / Σ(1/cote_j). Jamais 1/cote brut, qui contient la marge du bookmaker."),
+      Bullet("Marge du bookmaker sur le marché concerné (Σ 1/cote − 1) et son évolution avant la manche. L'idée qu'une hausse de marge « annonce » quelque chose n'est pas démontrée : c'est une variable à tester, pas une règle."),
+      Bullet("Changement de ligne (ex. durée de manche « plus/moins de 45 s » devenue « 47 s ») et son sens."),
+      Bullet("Mouvement de la cote avant la manche : tendance (hausse/baisse), amplitude, nombre de changements, suspensions récentes (le « clignotement rouge/vert » observé sur le site)."),
+      Note("AI Table Tennis : les cotes de transition « 1,85 / 1,85 » qui apparaissent en cours de jeu (≈ 13 % des changements, source principale du site) ne doivent jamais être traitées comme une vraie cote. Les filtrer, ou les signaler par une variable dédiée."),
+
+      H2("4.5 Séries récentes (statut : à valider, probablement sans effet)"),
+      Bullet("Proportion d'issues « Plus » (ou de victoires du favori, de Fatality…) sur les 3, 6 et 12 dernières heures, et écart entre ces issues et ce que les cotes prévoyaient."),
+      P("L'hypothèse sous-jacente, un « cycle de compensation » du générateur, est le même raisonnement que la martingale. Les données disponibles ne la soutiennent pas : sur 21 302 sets AI Table Tennis, le vainqueur d'un set gagne le suivant dans 50,7 % (Prague) et 49,7 % (Goa) des cas. Ces variables sont peu coûteuses à tester ; elles ne sont conservées que si la validation hors entraînement montre une amélioration réelle, en tenant compte du nombre d'essais (section 9)."),
+
+      H2("4.6 Règle impérative anti-fuite (data leakage)"),
       Note("Toute variable agrégée par combattant (durée moyenne, répartition des finishes) doit être calculée en ne regardant QUE les matchs dont la date de début est antérieure à la manche à prédire. Calculer ces agrégats sur l'ensemble des données (passé ET futur) donnerait une performance artificiellement excellente en test, totalement inexploitable en production — c'est l'erreur la plus fréquente et la plus dangereuse dans ce genre de projet."),
 
       // ================================================================ 5. VOLUME NÉCESSAIRE
@@ -219,7 +231,7 @@ const doc = new Document({
         "WHERE g = 1074 AND round_no = :round_no AND game_id = :game_id",
         "ORDER BY game_id, round_no, ts_server DESC;",
       ]),
-      H2("6.3 Agrégats glissants par combattant (calcul causal, voir 4.4)"),
+      H2("6.3 Agrégats glissants par combattant (calcul causal, voir 4.6)"),
       Code([
         "-- Pour un combattant et une date de référence donnés :",
         "-- durée moyenne de ses manches sur les matchs commencés AVANT cette date.",
@@ -246,6 +258,13 @@ const doc = new Document({
       Bullet("Pondération des classes rares (class_weight ou rééchantillonnage) dans tous les cas — un modèle non pondéré prédira presque toujours Regular ou Fatality et ignorera Hara-Kiri/Animality/Friendship/Babality."),
       Bullet("Alternative si le volume de classes rares reste insuffisant après plusieurs semaines (section 5) : regrouper Babality/Friendship/Animality/Hara-Kiri en une classe « finish spécial rare » pour un modèle en production plus robuste, tout en gardant un modèle de recherche séparé, plus fin, à mesure que les données rares s'accumulent."),
 
+      H2("7.3 Critère de sélection : la calibration, pas la précision"),
+      P("Référence : Walsh & Joshi (Université de Bath), « Machine learning for sports betting: should model selection be based on accuracy or calibration? », Machine Learning with Applications, 2024 (arXiv:2303.06021 v4). Sur des paris NBA simulés sur une saison, avec découpage strictement temporel, le modèle choisi pour sa calibration rapporte +34,69 % en moyenne, contre −35,17 % pour celui choisi pour sa précision — alors que ce dernier était légèrement plus précis (64,62 % contre 64,27 %). En mise Kelly 1/8, le modèle choisi pour sa précision perd 75,9 %."),
+      Note("Les chiffres « 110 % contre 2,9 % » qui circulent viennent de la première version (2023) de cet article, révisée depuis. Limites reconnues par les auteurs : une seule saison de paris, seuil de 80 % d'intervalles remplis choisi arbitrairement, sport humain où le marché peut se tromper. Sur nos jeux virtuels, le marché est déjà bien calibré (section 8.3) : la calibration est NÉCESSAIRE mais pas SUFFISANTE, le modèle doit aussi mieux discriminer que la cote."),
+      Bullet("Métriques de sélection : log-loss et classwise-ECE (erreur de calibration par classe, 20 intervalles, avec au moins 80 % d'intervalles non vides pour empêcher un modèle de se réfugier autour de la moyenne). Jamais la précision (accuracy) seule."),
+      Bullet("Le même critère sert au choix des variables (sélection séquentielle), au réglage des hyperparamètres (optimisation bayésienne) et à l'examen de passage quotidien champion/challenger (section 12)."),
+      Bullet("Modèles d'arbres (LightGBM/XGBoost) plutôt que réseaux récurrents (LSTM) : sur des données tabulaires de cette taille, ils sont en général plus robustes et bien moins coûteux."),
+
       // ================================================================ 8. ÉVALUATION
       H1("8. Évaluation"),
       H2("8.1 Modèle Mortal Kombat X"),
@@ -271,6 +290,12 @@ const doc = new Document({
       Note("Le marché est déjà bien calibré : suivre simplement le favori n'apporte aucun avantage. Un modèle n'a de valeur que s'il fait mieux que cette probabilité implicite, marge comprise. Un backtest de la martingale (mises 1000/2000/4000/8000 F) sur ces mêmes données a perdu dans les 12 variantes testées (−1 % à −14 % des sommes misées) : aucun système de mise ne crée d'avantage à lui seul."),
       P("Taille d'échantillon nécessaire pour valider un avantage : avec une cote autour de 1,7, l'écart-type du rendement d'un pari est d'environ 0,83. Distinguer un avantage réel de 3 % d'un coup de chance demande donc de l'ordre de 3 000 à 7 000 paris simulés hors entraînement — soit 1 à 3 semaines supplémentaires de validation, le modèle ne pariant que sur une partie des manches."),
 
+      H2("8.4 Règle de pari et de mise"),
+      Bullet("Uniquement des value bets : probabilité du modèle supérieure à la probabilité implicite du marché MARGE RETIRÉE, au-delà d'un seuil minimal d'avantage fixé sur la validation (pas sur le test)."),
+      Bullet("Mise fixe d'abord. Kelly fractionné (1/8) seulement une fois la calibration prouvée hors entraînement : Kelly amplifie toute erreur de calibration (−75,9 % dans l'étude de Bath)."),
+      Bullet("Aucune progression selon les pertes précédentes (martingale) : les backtests sur nos données la montrent perdante dans toutes les variantes testées, la perte correspondant à la marge du bookmaker."),
+      Bullet("Backtest toujours avec la cote réellement disponible au moment du pari (dernière cote avant fermeture du marché), jamais une cote postérieure ; cotes de transition 1,85/1,85 d'AI Table Tennis exclues."),
+
       // ================================================================ 9. VALIDATION
       H1("9. Protocole de validation (walk-forward)"),
       P("Plutôt qu'un unique découpage entraînement/test figé, valider en avançant dans le temps, à mesure que les données s'accumulent :"),
@@ -278,6 +303,8 @@ const doc = new Document({
       Bullet("Semaine 2 : entraîner sur les jours 1 à 12, valider sur les jours 13 à 14"),
       Bullet("Et ainsi de suite — chaque nouvelle fenêtre de validation est toujours strictement postérieure à son entraînement"),
       P("Cette discipline détecte tôt un problème de dérive (le fournisseur change son générateur) ou de surapprentissage, plutôt que de le découvrir une fois le modèle mis en production."),
+      Bullet("Purge et embargo (López de Prado, Advances in Financial Machine Learning) : retirer de l'entraînement les matchs chevauchant la période de validation, et laisser un court intervalle vide entre les deux, pour qu'aucune information corrélée (même match, historique glissant) ne passe de l'un à l'autre."),
+      Bullet("Nombre d'essais : chaque variante testée (variables, hyperparamètres, règles de pari) augmente la probabilité qu'une d'elles paraisse rentable par pur hasard. Tenir un registre des essais et exiger une marge de sécurité croissante avec ce nombre avant de conclure à un avantage réel."),
 
       // ================================================================ 10. CALENDRIER
       H1("10. Calendrier et feuille de route"),
@@ -304,7 +331,7 @@ const doc = new Document({
       H2("12.1 Déroulement quotidien (champion contre challenger)"),
       Bullet("Chaque jour à heure fixe (ex. 4h00 UTC, après la sauvegarde de 3h00), une tâche cron lance l'entraînement dans un conteneur séparé (profil Docker dédié), jamais dans le conteneur du collecteur."),
       Bullet("Extraction des données à jour (section 6), entraînement d'un nouveau modèle : le « challenger »."),
-      Bullet("Examen de passage, sur les 1 à 2 derniers jours qu'aucun des deux modèles n'a vus : le challenger doit faire au moins aussi bien que le modèle en place (le « champion »), faire mieux que la probabilité implicite du marché, et réussir les contrôles de cohérence (volume minimal de données, calibration correcte, aucune valeur aberrante)."),
+      Bullet("Examen de passage, sur les 1 à 2 derniers jours qu'aucun des deux modèles n'a vus : le challenger doit faire au moins aussi bien que le modèle en place (le « champion »), faire mieux que la probabilité implicite du marché, et réussir les contrôles de cohérence (volume minimal de données, log-loss et classwise-ECE au moins aussi bons que le champion — section 7.3 —, aucune valeur aberrante)."),
       Bullet("Examen réussi : le modèle est enregistré avec sa date et ses métriques, puis désigné comme modèle actif. Le collecteur le charge seul au match suivant, sans redémarrage ni coupure de service."),
       Bullet("Examen échoué : le champion reste en place, rien ne change en production."),
       Bullet("Dans les deux cas, un message sur le canal d'alertes techniques (ex. « Nouveau modèle déployé : log-loss 0,672 → 0,668 » ou « Modèle du jour rejeté, ancien conservé »)."),
@@ -320,10 +347,15 @@ const doc = new Document({
       Bullet("Nature simulée du jeu : plancher d'aléa irréductible, déjà signalé en section 1.3 — à rappeler dans toute présentation des résultats pour ne pas sur-promettre."),
       Bullet("Déséquilibre extrême des classes rares côté MK3 (Hara-Kiri, Animality) : un modèle entraîné trop tôt sur trop peu d'exemples de ces classes donnera des probabilités non fiables sur elles, même si le reste du modèle est bon."),
       Bullet("Dérive possible si le fournisseur du jeu modifie son générateur (nouveaux personnages, rééquilibrage) : le protocole walk-forward (section 9) est la principale protection, à ne jamais sauter une fois le modèle en production."),
-      Bullet("Fuite de données (data leakage) : rappelée en 4.4 et 6.4 car c'est l'erreur la plus fréquente et la plus difficile à détecter a posteriori — toujours vérifier qu'aucune variable ne \"voit\" le futur par rapport à la manche prédite."),
+      Bullet("Fuite de données (data leakage) : rappelée en 4.6 et 6.4 car c'est l'erreur la plus fréquente et la plus difficile à détecter a posteriori — toujours vérifier qu'aucune variable ne \"voit\" le futur par rapport à la manche prédite."),
       Bullet("Champ WT de round_results, dont la signification reste non établie (Memoire.md, section 15) : à exclure des variables tant qu'il n'est pas mieux compris, plutôt que de l'utiliser à l'aveugle."),
 
       // ================================================================ ANNEXE
+      H1("Annexe — références"),
+      Bullet("Walsh C., Joshi A. (2024), « Machine learning for sports betting: should model selection be based on accuracy or calibration? », Machine Learning with Applications — arXiv:2303.06021 (v4). Retenu : sélection par calibration (classwise-ECE), value bets, mise fixe avant Kelly fractionné."),
+      Bullet("« XGBoost Learning of Dynamic Wager Placement for In-Play Betting » (Université de Bristol), arXiv:2401.06086. Données entièrement simulées (courses fictives) ; les auteurs déconseillent d'en tirer des paris réels. Retenu seulement : combiner état du jeu en direct et état du marché comme variables."),
+      Bullet("López de Prado M., « Advances in Financial Machine Learning ». Retenu : validation croisée purgée avec embargo, prise en compte du nombre d'essais. Non retenu : Triple-Barrier Labels, conçus pour des séries boursières continues (nos issues sont déjà naturellement étiquetées)."),
+
       H1("Annexe — glossaire rapide"),
       table([2400, 6200], [
         ["Terme", "Définition"],
