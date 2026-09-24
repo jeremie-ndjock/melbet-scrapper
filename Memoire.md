@@ -1833,8 +1833,8 @@ correctifs, confirmé par l'utilisateur.
 L'utilisateur a demandé un avis sur une stratégie de mise : 1000 F sur la manche 1, puis mise
 doublée après chaque perte (2000, 4000, 8000 F), jusqu'à 4 manches. C'est la **martingale**.
 Plutôt qu'une réponse théorique seule, backtest sur les vraies données de production
-(≈ 8 600 manches du 22 au 24 septembre, script ponctuel dans le dossier temporaire de la session,
-non versionné) :
+(≈ 8 600 manches du 22 au 24 septembre ; script versionné ensuite dans
+`scripts/backtest_martingale_mk.py`, requête d'export incluse dans sa docstring, voir section 36) :
 
 - **Marché utilisé** : « Victoire dans le Round » (`g=1050`, `t=2140` V1 / `t=2141` V2). Vérifié
   avant de coder sur un vrai match : la cote de la manche N est publiée pendant la manche N−1 et se
@@ -1906,3 +1906,63 @@ négociable : **jamais de remplacement sans examen de passage**.
 Plan d'entraînement mis à jour en conséquence (`docs/forecasting/generate.js`, document régénéré) :
 nouvelle section 8.3 (repères mesurés sur le marché), calendrier (section 10) complété des phases
 5 et 6, nouvelle section 12 (réentraînement automatique), « Risques et limites » renumérotée 13.
+
+## 36. Martingale sur AI Table Tennis : backtest, et deux découvertes sur les cotes de set (2026-09-24)
+
+L'utilisateur a posé la même question que pour Mortal Kombat (1000/2000/4000/8000 F sur 4
+« manches »), cette fois pour AI Table Tennis, où une « manche » est un **set**. Même démarche :
+backtest sur les vraies données avant toute conclusion.
+
+### Deux découvertes faites en préparant le backtest
+
+**1. Des cotes « 1,85 / 1,85 » qui clignotent en cours de jeu.** Sur un vrai match, la cote du
+match et celle du set en cours reviennent à 1,85/1,85 un relevé sur deux. Vérifié en base : elles
+viennent de la **source principale** du site (≈ 13 % des changements de cote `g=1`, en continu,
+jour et nuit, identique avant et après le correctif du 204), pas du collecteur ni de la source de
+secours. Probablement une valeur de transition entre deux points (peut-être le clignotement
+rouge/vert remarqué par l'utilisateur). Impossible de savoir si un pari y est réellement accepté :
+**à exclure de toute analyse de prix en cours de set**, et à traiter explicitement dans le futur
+modèle (filtre ou variable dédiée), jamais comme une vraie cote par défaut.
+
+**2. Pas de vraie cote « avant le set » : la cote d'ouverture est 1,85 / 1,85.** Pendant le set
+N−1, le marché du set N affiche 1,85/1,85 ; une cote différente n'apparaît qu'une fois le set N
+commencé, puis bouge point par point (match observé : set 2 commencé à 18:44:50, première vraie
+cote à 18:44:59). Mesuré sur 671 marchés de set : **57 % s'ouvrent à 1,85/1,85**, les autres ayant
+été découverts par le collecteur alors que le set était déjà en cours. Miser sur un set juste
+après en avoir perdu un se fait donc à **1,85**, soit une marge de 8,1 % (1/1,85 × 2 = 1,081). Un
+détail utile : l'ordre des identifiants de sous-match ne suit pas l'ordre des sets (sur ce match,
+`…035` était le set 1 et `…034` le set 2), et le nom du sous-match (« 2 Set ») n'est pas stocké en
+base — à ajouter si un modèle par set est développé un jour.
+
+### Résultats (8 533 matchs, 21 302 sets, du 18 août au 24 septembre)
+
+Données : table `results` (score officiel complet de chaque match, ex. `0:2 (10:12,7:11)`, donc le
+vainqueur de chaque set), grâce au rattrapage historique ; beaucoup plus solide que les 2 jours
+disponibles pour le backtest Mortal Kombat.
+
+- **Chaque set est un pile ou face** : le joueur 1 gagne 50,2 % (Prague) et 50,6 % (Goa) des sets ;
+  le vainqueur d'un set gagne aussi le suivant dans 50,7 % et 49,7 % des cas — aucun « élan » à
+  suivre ni à contrer.
+- **À la cote réelle de 1,85, les 12 variantes perdent** (2 salles × 2 lectures × 3 choix de
+  joueur : toujours joueur 1, suivre le vainqueur du set précédent, parier contre lui), de **−6,0 %
+  à −8,9 %** des sommes misées, soit de −0,85 à −2,0 millions de F en 5 semaines selon la variante.
+  En lecture continue, environ **350 séries de 4 sets perdus par salle** (≈ 10 par jour, −15 000 F
+  chacune), et un creux maximal de 1,4 à 2,0 millions de F.
+- **Preuve que la perte vient de la marge** : la même simulation avec une cote fictive de 2,00 (sans
+  marge) tombe autour de zéro (−1,5 % à +1,7 %, simple bruit). La martingale elle-même ne gagne ni
+  ne perd rien ; toute la perte vient des 8,1 % de marge.
+- **Conséquence pour un futur modèle AI Table Tennis** (non couvert par le plan d'entraînement
+  actuel, qui ne porte que sur Mortal Kombat) : il faudrait prédire le vainqueur d'un set à
+  **plus de 54,1 %** (1/1,85) pour être rentable, sur un jeu qui se comporte à première vue comme un
+  pile ou face. À évaluer d'abord : existe-t-il un signal au-delà de 50 % (joueurs, forme récente,
+  service, cotes en cours de set) ?
+
+### Scripts versionnés
+
+À la demande de l'utilisateur, les deux backtests sont ajoutés au projet pour être relancés plus
+tard (plus de données, puis comparaison avec les prédictions des futurs modèles) :
+`scripts/backtest_martingale_mk.py` et `scripts/backtest_martingale_tt.py` (bibliothèque standard
+uniquement, requête d'export SQL incluse dans chaque docstring), vérifiés comme reproduisant
+exactement les chiffres ci-dessus et en section 35. 17 tests unitaires de leur logique de calcul
+(`tests/unit/test_backtest_martingale.py`), dont un qui fige le point central de l'explication :
+à 1,69, gagner la 4e manche laisse quand même le cycle à −1 480 F.
