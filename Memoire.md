@@ -2125,11 +2125,12 @@ prédiction manche par manche** tant qu'aucun avantage n'est démontré. Implém
 - le service `ml` ne reçoit que cette variable et le jeton du bot, jamais le reste du `.env` ;
 - les tests neutralisent ces variables, car le conteneur de tests charge le vrai `.env`.
 
-## 39. [CONTEXTE-EN-COURS] Mandat « super administrateur » : prédictions en direct sur Telegram (2026-09-25)
+## 39. [CONTEXTE-EN-COURS] Mandat « super administrateur » : prédictions en direct sur Telegram (2026-09-25) — TERMINÉ
 
-> **Repère pour reprendre le travail après une coupure ou une compaction du contexte.** Cette
-> section décrit le travail en cours et est mise à jour à chaque étape. Chercher
-> `[CONTEXTE-EN-COURS]` dans ce fichier.
+> **Repère pour reprendre le travail après une coupure ou une compaction du contexte.** Chercher
+> `[CONTEXTE-EN-COURS]` dans ce fichier. **État au 25 septembre 2026, 19 h 15 UTC : mandat terminé**,
+> service de prédictions en production, rien en cours. Les suites possibles sont listées à la fin
+> de la section.
 
 **Mandat** (2026-09-25, ≈ 19 h UTC) : l'utilisateur s'absente (machine locale programmée pour
 s'éteindre ≈ 3 h plus tard) et donne le rôle de super administrateur : « aller jusqu'au bout ». Il
@@ -2180,5 +2181,28 @@ nouveau service.
 - [x] Exécution officielle sur le VPS (modèles dans `ml_artifacts`), rapport rapatrié.
 - [x] Déploiement sur le VPS + vérification réelle (messages publiés, prédictions avant chaque manche).
 - [x] 2e passe complète de la suite : 345 tests réussis.
-- [ ] Contrôle de reproductibilité (2e exécution même `as_of`), nettoyage des essais sur le VPS, commit final.
+- [x] Contrôle de reproductibilité : 2e exécution sur la même date de référence, `resultats.json` identique octet pour octet.
+- [x] Nettoyage du VPS : dossier et image d'essai, conteneurs arrêtés et images temporaires supprimés (disque à 23 %).
+- [x] Commit + push final.
+
+**Santé à la clôture (19 h 14 UTC)** :
+- collecte à jour pour les 4 ligues, `scraper` en état `healthy` ;
+- `predictor` à ≈ 220 Mo et ≈ 0 % de CPU au repos, 31 envois ou éditions en 8 minutes ;
+- un seul avertissement : une coupure réseau ponctuelle vers Telegram pendant une édition.
+
+**Limite connue (même comportement que le fil de match existant)** : si l'édition d'un message
+échoue, `MatchFeedSender.send_or_edit` envoie un nouveau message. Une coupure réseau ponctuelle peut
+donc laisser un message figé en double pour un match. Amélioration possible : réessayer l'édition
+au cycle suivant au lieu d'envoyer un nouveau message, en distinguant l'erreur réseau de l'erreur
+« message trop ancien ».
+
+**Suites possibles (non faites, à décider avec l'utilisateur)** :
+- **Réentraînement quotidien automatique** avec examen de passage champion/challenger (plan,
+  section 12). Pour l'instant, les poids des modèles restent ceux du 25 septembre, mais le
+  service recalcule l'historique des combattants toutes les 30 min.
+- **Règle de pari prudente pour le type de finish** (R/F/B seulement, seuil plus élevé), à fixer à
+  l'avance puis à juger sur des données futures (section 38).
+- **Bilan quotidien des prédictions en direct** (taux de réussite réel face au marché) à partir de
+  `live_state.json`, ou mieux, d'une table dédiée.
+- **Régénérer le jeton du bot** si un doute existe sur l'accès aux anciens journaux du VPS.
 - [ ] Deux passes complètes de tests, commit + push final, clôture de cette section.
