@@ -23,3 +23,7 @@ htmlcov/
 # Dépendance de build locale (docs/forecasting/generate.js, génération du plan d'entraînement)
 node_modules/
 package-lock.json
+
+# Modèles entraînés (volume Docker `ml_artifacts`), jamais versionnés ; les rapports, eux, le sont
+artifacts/
+*.joblib

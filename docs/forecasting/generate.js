@@ -124,6 +124,7 @@ const doc = new Document({
       // ================================================================ 2. DONNÉES SOURCES
       H1("2. Données sources (rappel du schéma)"),
       P("Toutes les tables ci-dessous existent déjà en production (voir migrations/001 à 008) et sont alimentées en continu, avec une rétention indéfinie."),
+      Note("Mesuré le 25 septembre 2026 : grâce au rattrapage des résultats officiels (90 jours), results et round_results couvrent déjà 3 mois (depuis le 24 juin), soit ≈ 26 700 matchs et ≈ 190 000 manches par ligue, avec vainqueur et type de finish de chaque manche. En revanche, la durée de manche (seconds, fil en direct) et les cotes (odds_snapshots) n'existent que depuis le 22 septembre."),
       table([2200, 6400], [
         ["Table", "Champs utiles pour ces deux modèles"],
         ["events", "league_id, p1_name, p2_name, start_ts, status — identité du match et des deux combattants"],
@@ -132,7 +133,7 @@ const doc = new Document({
         ["odds_snapshots", "g=1074 (Durée du Round, Plus/Moins) : ligne et cote de référence pour le modèle MKX. g=1066 (Mode de Victoire : Fatality/Brutality/No Finish) et g=3533 (Fatality dans Round, Oui/Non) : référence partielle pour le modèle MK3."],
         ["results", "final_score1/2, winner, date_start — rattrapage historique, utile pour enrichir l'historique par combattant au-delà de ce que le direct a capté"],
       ]),
-      Note("Le marché « Mode de Victoire » (groupe 1066) ne distingue que 3 issues (Fatality / Brutality / No Finish), plus grossier que les 7 classes visées par le modèle MK3 — il sert de repère de comparaison partiel, pas de vérité terrain complète."),
+      Note("Corrigé le 25 septembre 2026 : sur Mortal Kombat 3, le marché « Mode de Victoire » (groupe 1066) couvre bien les 7 classes (4059 No Finish = Regular, 4057 Fatality, 4058 Brutality, 14003 Babality, 13550 Amitié, 14005 Animality, 14007 Hara-Kiri). Seul Mortal Kombat X se limite à 3 issues. Le marché « Durée du Round » (1074) propose plusieurs lignes par manche ; la ligne principale est celle dont les cotes « plus » et « moins » sont les plus proches (l'indicateur is_center du site n'est jamais renseigné)."),
 
       // ================================================================ 3. CIBLES
       H1("3. Définition précise des cibles"),
@@ -153,7 +154,7 @@ const doc = new Document({
         ["Animality", "0,6 %", "≈ 13", "≈ 8 jours"],
         ["Hara-Kiri", "0,1 %", "≈ 2", "≈ 48 jours"],
       ]),
-      Note("La classe Hara-Kiri est le vrai facteur limitant du calendrier de collecte pour ce modèle (section 5) : à ≈2 manches par jour, réunir ne serait-ce que 100 exemples prend près de 7 semaines. Options à évaluer le moment venu : regrouper les classes les plus rares avec Brutality dans une catégorie « finish spécial » pour un premier modèle, ou accepter une incertitude élevée sur ces classes en attendant plus de données."),
+      Note("Levé le 25 septembre 2026 : l'historique rattrapé contient déjà 284 Hara-Kiri, 1 177 Animality, 2 703 Friendship et 4 590 Babality sur Mortal Kombat 3. Les classes rares ne limitent plus l'entraînement ; elles restent en revanche trop rares dans une fenêtre de test de quelques jours pour y juger un résultat par classe."),
 
       // ================================================================ 4. FEATURES
       H1("4. Ingénierie des variables (features)"),
@@ -197,7 +198,7 @@ const doc = new Document({
         ["Distribution générale (round_no, score, sans distinguer les combattants)", "Quelques milliers de manches", "3 à 7 jours"],
         ["Effet par combattant individuel (33 pour MKX, 32 pour MK3)", "≈ 100 manches par combattant", "2 à 3 semaines"],
         ["Effet par matchup (paire de combattants) — ≈ 528 paires possibles pour MKX, ≈ 496 pour MK3", "≈ 30 matchs par paire", "4 à 8 semaines, plus pour les paires rares"],
-        ["Classe Hara-Kiri (MK3) à un niveau fiable (≈100 exemples)", "≈ 100 manches Hara-Kiri", "≈ 7 semaines (facteur limitant du projet MK3)"],
+        ["Classe Hara-Kiri (MK3) à un niveau fiable (≈100 exemples)", "≈ 100 manches Hara-Kiri", "Déjà atteint grâce au rattrapage historique (284 au 25 septembre)"],
         ["Saisonnalité (jour de semaine, dérive éventuelle du fournisseur)", "Au moins 2 à 3 cycles complets", "3 à 4 semaines minimum"],
       ]),
       P("Recommandation retenue pour ce plan : ne pas attendre un seuil fixe avant de commencer. La collecte tourne déjà 24 h/24 avec une rétention indéfinie — un premier modèle baseline est entraîné dès J+3 à J+7 (section 10), puis réentraîné régulièrement à mesure que le volume grandit."),
@@ -255,13 +256,15 @@ const doc = new Document({
 
       H2("7.2 Mortal Kombat 3 — type de finish"),
       Bullet("Approche hiérarchique recommandée compte tenu du déséquilibre des classes (section 3.2) : (a) un premier modèle binaire Fatality vs. Non-Fatality (les deux classes majoritaires, où le marché 3533 donne déjà un repère direct), puis (b) un second modèle, conditionnel, pour résoudre le type exact au sein de chaque branche."),
-      Bullet("Pondération des classes rares (class_weight ou rééchantillonnage) dans tous les cas — un modèle non pondéré prédira presque toujours Regular ou Fatality et ignorera Hara-Kiri/Animality/Friendship/Babality."),
+      Bullet("Révisé le 25 septembre 2026 : AUCUNE pondération des classes rares. Pondérer (class_weight, rééchantillonnage) déforme les probabilités, ce qui contredit le critère de calibration (section 7.3). Modèle entraîné sur la log-loss, régularisé, puis recalibré (temperature scaling). Un rappel proche de 0 sur Hara-Kiri ou Animality est alors normal : un modèle calibré ne prédit presque jamais une issue à 0,15 % comme la plus probable."),
       Bullet("Alternative si le volume de classes rares reste insuffisant après plusieurs semaines (section 5) : regrouper Babality/Friendship/Animality/Hara-Kiri en une classe « finish spécial rare » pour un modèle en production plus robuste, tout en gardant un modèle de recherche séparé, plus fin, à mesure que les données rares s'accumulent."),
 
       H2("7.3 Critère de sélection : la calibration, pas la précision"),
       P("Référence : Walsh & Joshi (Université de Bath), « Machine learning for sports betting: should model selection be based on accuracy or calibration? », Machine Learning with Applications, 2024 (arXiv:2303.06021 v4). Sur des paris NBA simulés sur une saison, avec découpage strictement temporel, le modèle choisi pour sa calibration rapporte +34,69 % en moyenne, contre −35,17 % pour celui choisi pour sa précision — alors que ce dernier était légèrement plus précis (64,62 % contre 64,27 %). En mise Kelly 1/8, le modèle choisi pour sa précision perd 75,9 %."),
       Note("Les chiffres « 110 % contre 2,9 % » qui circulent viennent de la première version (2023) de cet article, révisée depuis. Limites reconnues par les auteurs : une seule saison de paris, seuil de 80 % d'intervalles remplis choisi arbitrairement, sport humain où le marché peut se tromper. Sur nos jeux virtuels, le marché est déjà bien calibré (section 8.3) : la calibration est NÉCESSAIRE mais pas SUFFISANTE, le modèle doit aussi mieux discriminer que la cote."),
-      Bullet("Métriques de sélection : log-loss et classwise-ECE (erreur de calibration par classe, 20 intervalles, avec au moins 80 % d'intervalles non vides pour empêcher un modèle de se réfugier autour de la moyenne). Jamais la précision (accuracy) seule."),
+      Bullet("Métriques de sélection : log-loss et classwise-ECE (erreur de calibration par classe, 20 intervalles). Jamais la précision (accuracy) seule."),
+      Bullet("Révisé le 25 septembre 2026 : la règle « au moins 80 % d'intervalles non vides » est intenable avec 20 intervalles de même largeur sur nos marchés — même le bookmaker y échoue (probabilités de vainqueur entre ≈ 0,25 et 0,75). L'ECE est donc calculée aussi avec 20 intervalles de même effectif, utilisée comme garde-fou ; la part d'intervalles non vides reste publiée."),
+      Bullet("Verdict fondé sur la question « le modèle apporte-t-il une information que le marché n'a pas ? » : combinaison log-linéaire log p ∝ b·log p_marché + c·log p_modèle, comparée au marché seul recalibré sur la même période. Un poids c nul signifie que le modèle n'apporte rien."),
       Bullet("Le même critère sert au choix des variables (sélection séquentielle), au réglage des hyperparamètres (optimisation bayésienne) et à l'examen de passage quotidien champion/challenger (section 12)."),
       Bullet("Modèles d'arbres (LightGBM/XGBoost) plutôt que réseaux récurrents (LSTM) : sur des données tabulaires de cette taille, ils sont en général plus robustes et bien moins coûteux."),
 
@@ -311,13 +314,22 @@ const doc = new Document({
       table([1600, 2600, 5800], [
         ["Phase", "Échéance", "Contenu"],
         ["1", "Continu (déjà en cours)", "La collecte tourne 24 h/24 sans interruption ; aucune action requise, seulement laisser le volume s'accumuler"],
-        ["2", "Jour 3 à 7", "Extraction du premier jeu de données (section 6), modèle baseline sur les variables génériques (4.1), première comparaison au marché (8)"],
+        ["2", "Jour 3 à 7 (fait le 25 septembre 2026)", "Extraction, modèles (régression logistique et LightGBM), calibration, comparaison au marché et backtest pour les 3 cibles (durée MKX, finish MK3, vainqueur de manche MKX et MK3) : voir 10.1"],
         ["3", "Semaine 2 à 3", "Ajout des variables par combattant individuel ; réentraînement ; premier bilan de calibration"],
         ["4", "Semaine 4 à 8", "Ajout des variables de matchup (paire de combattants) si le volume le permet ; regroupement des classes rares MK3 si nécessaire (7.2)"],
         ["5", "Après validation d'un avantage", "Prédictions en direct sur un salon Telegram dédié (11), réentraînement encore manuel"],
         ["6", "Continu ensuite", "Réentraînement et redéploiement automatiques quotidiens, avec examen de passage champion/challenger (12) ; surveillance de la dérive par rapport au marché"],
       ]),
       Note("Calendrier réaliste d'un modèle fiable, s'il existe un signal exploitable : premier verdict vers le 25 septembre 2026 (J+3), modèle complet vers fin octobre - mi-novembre, plus 1 à 3 semaines de validation hors entraînement avant de s'y fier. Il est possible que l'étude conclue à l'absence d'avantage exploitable : ce serait un résultat à part entière."),
+
+      H2("10.1 Premier verdict (25 septembre 2026, rapport reports/forecasting/)"),
+      table([2600, 2300, 4700], [
+        ["Cible", "Verdict", "Détail"],
+        ["Vainqueur de manche MKX et MK3", "Aucun avantage détecté", "Le modèle seul fait moins bien que le marché ; son poids dans la combinaison est nul. Le marché intègre déjà la force des combattants."],
+        ["Type de finish MK3", "Signal prometteur, non démontré", "Log-loss nettement meilleure que le marché (quelle que soit la méthode de retrait de la marge) : les cotes des finishes rares sont quasiment figées. Mais le backtest à cotes réelles perd (−9,4 %, IC très large), les paris se concentrant sur des issues rares à grosse cote."],
+        ["Durée de manche MKX", "Préliminaire (≈ 3 jours)", "Aucune conclusion possible : écart de log-loss dans le bruit, trop peu de paris."],
+      ]),
+      Note("Prochaine étape pour le type de finish : fixer À L'AVANCE une règle de pari prudente (issues fréquentes R/F/B seulement, seuil d'avantage plus élevé) et la juger sur des données futures, jamais en la réajustant sur la fenêtre déjà utilisée pour le test. Un bilan de chaque évaluation est publié sur le salon Telegram « Prédiction Mortal Kombat » ; aucune prédiction manche par manche tant qu'aucun avantage n'est démontré."),
 
       // ================================================================ 11. INTÉGRATION
       H1("11. Intégration temps réel (aperçu — phase ultérieure)"),

@@ -64,9 +64,17 @@ async def dsn():
     name = f"test_{uuid.uuid4().hex[:12]}"
     await _admin_execute(f'CREATE DATABASE "{name}"')
     try:
-        yield _dsn_for(name)
+        yield _MaskedDsn(_dsn_for(name))
     finally:
         await _admin_execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+class _MaskedDsn(str):
+    """DSN utilisable tel quel, mais dont l'affichage masque le mot de passe : pytest affiche la
+    valeur des paramètres d'un test en échec, et elle ne doit jamais apparaître dans un journal."""
+
+    def __repr__(self) -> str:
+        return "'<DSN masqué>'"
 
 
 async def _create_from_template(name: str, template: str, attempts: int = 30) -> None:
@@ -100,6 +108,18 @@ async def db(template_db):
         yield conn
     finally:
         await conn.close()
+        await _admin_execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
+@pytest.fixture
+async def db_dsn(template_db):
+    """DSN d'une copie neuve de la base modèle migrée (pour le code qui ouvre lui-même sa
+    connexion, comme l'extraction en lecture seule de `forecasting`)."""
+    name = f"test_{uuid.uuid4().hex[:12]}"
+    await _create_from_template(name, template_db)
+    try:
+        yield _MaskedDsn(_dsn_for(name))
+    finally:
         await _admin_execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
 
 

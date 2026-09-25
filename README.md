@@ -52,7 +52,7 @@ code nécessaire.
 
 ```bash
 docker compose run --rm tests                                          # suite complète
-docker compose run --rm tests pytest --cov=collector --cov-report=term-missing -q  # avec couverture
+docker compose run --rm tests pytest --cov=collector --cov=forecasting --cov-report=term-missing -q  # avec couverture
 ```
 
 198 tests (unitaires et intégration), 96 % de couverture (branches). Les tests d'intégration
@@ -73,6 +73,24 @@ conteneur entièrement à l'arrêt). À installer en tâche planifiée sur le VP
 dépendances nécessaires, sans dupliquer d'image dédiée pour un script de quelques lignes lancé
 toutes les 5 minutes.)
 
+## Modèles prédictifs
+
+`src/forecasting` entraîne et évalue les modèles du plan d'entraînement
+(`docs/forecasting/plan_entrainement_mortal_kombat.docx`) face aux cotes du bookmaker, dans un
+conteneur dédié qui lit la base en lecture seule (Memoire.md, section 38). Sur le VPS :
+
+```bash
+mkdir -p reports/forecasting && sudo chown 10001:10001 reports/forecasting   # une seule fois
+GIT_COMMIT=$(git rev-parse --short HEAD) docker compose --profile ml build ml
+docker compose --profile ml run --rm ml python -m forecasting check-data     # qualité des données
+docker compose --profile ml run --rm ml                                       # évaluation complète
+```
+
+Le rapport est écrit dans `reports/forecasting/<date>_<version>/` (versionné, avec le registre
+des essais `trials.jsonl`) et un bilan est envoyé sur le salon Telegram
+`TELEGRAM_PREDICTION_CHAT_ID`. Aucune prédiction manche par manche n'est publiée tant qu'aucun
+modèle n'a démontré un avantage de pari.
+
 ## Sauvegardes
 
 `scripts/backup_db.sh` fait un `pg_dump` compressé et horodaté de la base, avec rotation
@@ -92,6 +110,7 @@ plus des sauvegardes locales elles-mêmes.
 
 ```
 src/collector/          code du collecteur (voir docstrings de chaque module)
+src/forecasting/         entraînement et évaluation des modèles prédictifs (conteneur `ml`)
   sources/v3/            source principale (API v3 du site)
   sources/legacy/        source de secours (API historique, bascule automatique)
   storage/               requêtes SQL, écriture, migrations
@@ -102,6 +121,7 @@ migrations/              schéma SQL, appliqué automatiquement au démarrage
 scripts/                 outils d'exploitation (watchdog, sauvegarde, restauration)
 monitoring/              configuration Prometheus et provisioning Grafana
 tests/                   tests unitaires et d'intégration, données réelles de référence
+reports/forecasting/     rapports d'évaluation des modèles et registre des essais
 docs/architecture.md     architecture validée et décisions
 Memoire.md               journal complet du projet (reconnaissance + implémentation)
 ```

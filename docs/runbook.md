@@ -168,6 +168,17 @@ Ajouter :
 */5 * * * * cd /opt/oddscollector && docker compose --profile test run --rm tests python scripts/watchdog.py >> /var/log/oddscollector-watchdog.log 2>&1
 ```
 
+**Évaluation des modèles prédictifs** (conteneur `ml`, Memoire.md section 38) : pas encore
+planifiée. Préparation unique du dossier des rapports, écrit par l'utilisateur non root du
+conteneur (uid 10001) :
+
+```bash
+mkdir -p /opt/oddscollector/reports/forecasting && sudo chown 10001:10001 /opt/oddscollector/reports/forecasting
+```
+
+Le conteneur est limité à 1 vCPU (priorité basse) et 2 Go de mémoire : le collecteur n'est
+jamais ralenti. Sur une instance à 1 Go de mémoire, ne pas lancer l'entraînement sur le VPS.
+
 ## 8. Suivi des coûts (crédit de 100 $)
 
 Dès la création, dans la console AWS :

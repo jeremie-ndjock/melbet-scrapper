@@ -111,7 +111,67 @@ services:
     volumes:
       - .:/app
 
+  # Entraînement et évaluation des modèles prédictifs (src/forecasting, Memoire.md section 38) :
+  # `docker compose --profile ml run --rm ml`. Lecture seule de la base (session
+  # `default_transaction_read_only`). Pas d'`env_file` : seules les deux variables du bilan
+  # Telegram (salon « Prédiction Mortal Kombat ») sont transmises, jamais le reste du .env.
+  # Priorité CPU basse et mémoire bornée pour que le collecteur ne soit jamais ralenti. Rapports
+  # dans ./reports/forecasting (à créer une fois avec le propriétaire uid 10001, voir le runbook).
+  ml:
+    profiles: ["ml"]
+    image: oddscollector-ml
+    build:
+      context: .
+      target: ml
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-inconnu}
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_PREDICTION_CHAT_ID: ${TELEGRAM_PREDICTION_CHAT_ID:-}
+    cpus: 1.0
+    cpu_shares: 256
+    mem_limit: 2g
+    memswap_limit: 2g
+    volumes:
+      - ./reports/forecasting:/app/reports
+      - ml_artifacts:/app/artifacts
+
+  # Prédictions en direct sur le salon Telegram « Prédiction Mortal Kombat » (Memoire.md,
+  # section 39) : `docker compose --profile ml up -d predictor`. Même image que `ml`, lecture
+  # seule de la base, modèles lus dans `ml_artifacts` (produits par `ml`), état des messages dans
+  # ce même volume. Ressources plus basses encore que `ml` : il tourne en permanence.
+  predictor:
+    profiles: ["ml"]
+    image: oddscollector-ml
+    build:
+      context: .
+      target: ml
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-inconnu}
+    command: ["python", "-m", "forecasting", "live"]
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_PREDICTION_CHAT_ID: ${TELEGRAM_PREDICTION_CHAT_ID:-}
+    cpus: 0.5
+    cpu_shares: 256
+    mem_limit: 1g
+    memswap_limit: 1g
+    volumes:
+      - ml_artifacts:/app/artifacts
+
 volumes:
   db_data:
   prometheus_data:
   grafana_data:
+  ml_artifacts:

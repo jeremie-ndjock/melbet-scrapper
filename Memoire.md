@@ -1992,3 +1992,158 @@ Plan régénéré (`docs/forecasting/generate.js`) : sections 4.4 (variables dyn
 4.5 (séries récentes, « à valider »), anti-fuite renumérotée 4.6, 7.3 (critère de sélection par
 calibration), 8.4 (règle de pari et de mise), purge/embargo et registre des essais en section 9,
 ECE ajouté à l'examen de passage quotidien (12.1), annexe de références.
+
+## 38. Premier modèle de prédiction : pipeline d'entraînement et verdict face au marché (2026-09-25)
+
+Phase 2 du plan d'entraînement, lancée au J+3 prévu, sur un plan validé par l'utilisateur (trois
+cibles, exécution sur le VPS dans un conteneur dédié, lecture seule de la base).
+
+### Faits mesurés qui ont changé la conception
+
+- **3 mois d'étiquettes déjà disponibles** : le rattrapage des résultats officiels (90 jours) a
+  rempli `results` et `round_results` depuis le 24 juin, soit ≈ 26 700 matchs et ≈ 190 000
+  manches par ligue avec vainqueur et code de finish. MK3 compte **284 Hara-Kiri** (et non 4 : la
+  mesure de la section 35 ne portait que sur les matchs vus en direct). Le « facteur limitant de 7
+  semaines » du plan n'existe plus.
+- La durée de manche (fil en direct) et les cotes n'existent que depuis le 22 septembre.
+- `g=1066` sur MK3 couvre **les 7 classes** (le plan disait 3).
+- `g=1074` propose plusieurs lignes par manche, et `is_center` n'est jamais renseigné : la ligne
+  principale est celle aux cotes « plus » et « moins » les plus proches.
+- Dans `odds_snapshots`, les lignes « retirée » ont `round_no`/`line` vides mais `param` intact :
+  tout est décodé depuis `param` (vérifié sur toute la base, 0 écart).
+- Un match dure 12 min en médiane et 18 min au 99e centile : c'est le délai de disponibilité
+  anti-fuite. Un match n'entre dans l'historique qu'à `date_start + 18 min`.
+
+### Réalisation
+
+Nouveau paquet `src/forecasting/` (jamais importé par le collecteur, dont l'image reste sans
+pandas) :
+
+| Module | Rôle |
+|---|---|
+| `extract` | Session asyncpg `default_transaction_read_only`, requêtes bornées, transfert par COPY |
+| `quality` | Garde-fous d'orientation, de trous et de score |
+| `market` | Cote de clôture réellement jouable, retrait de la marge (multiplicatif et power), ligne principale |
+| `features` | Historique causal par combattant et face-à-face avec `merge_asof` strict, variables intra-match |
+| `split` | Purge, embargo, validation glissante |
+| `models` | Régression logistique, LightGBM à 1 fil déterministe, calibrateurs, combinaison log-linéaire |
+| `metrics` | Métriques, dont ECE à intervalles de même largeur et de même effectif |
+| `backtest` | Paris à mise fixe |
+| `trials` | Registre des essais |
+| `report` | Rapport et échelle de verdict |
+| `notify` | Bilan Telegram |
+| `pipelines` | Évaluation des trois cibles |
+| `__main__` | Commandes `check-data` / `run` |
+
+Côté infrastructure :
+- `requirements-ml.txt` épinglé (numpy 2.5.3, pandas 3.0.6, scipy 1.18.1, scikit-learn 1.9.1,
+  lightgbm 4.7.0).
+- Étape Docker `ml-deps` (avec `libgomp1`) ; `dev` en hérite, ce qui teste tout en une seule suite.
+- Nouvelle cible `ml` et service compose `ml` : profil « ml », 1 vCPU, `cpu_shares` 256, 2 Go de
+  mémoire, rapports dans `reports/forecasting/`, modèles dans le volume `ml_artifacts`.
+
+### Écarts assumés au plan, approuvés avec le plan
+
+- Aucune pondération des classes rares : elle fausserait les probabilités.
+- La règle « ≥ 80 % d'intervalles non vides » est intenable, même pour le bookmaker. On garde un
+  garde-fou ECE à intervalles de même effectif.
+- Le verdict porte sur l'information que le modèle ajoute au marché, via la combinaison
+  log-linéaire comparée au « marché recalibré ».
+- La cote de clôture est reconstruite par état du marché. Le `DISTINCT ON` du backtest de la
+  martingale pouvait apparier deux prix qui n'ont jamais coexisté.
+
+### Défauts trouvés en cours de route
+
+1. **ECE en division par zéro** quand toutes les probabilités sont identiques (cote figée). Trouvé
+   par le test de bout en bout, corrigé.
+2. **Colonnes absentes** quand une ligue n'a aucune cote. Corrigé, avec un verdict « Non évaluable ».
+3. **Mot de passe local exposé en cas d'échec de test.** pytest affiche la valeur des paramètres
+   d'un test en échec, donc l'adresse de connexion de la base de test (avec le mot de passe
+   Postgres du `.env` local) est apparue une fois dans la sortie d'une commande de la session.
+   Rien n'a été écrit dans un fichier ni versionné. Corrigé pour tous les tests :
+   `tests/integration/conftest.py` renvoie désormais une adresse dont l'affichage masque le mot de
+   passe (`'<DSN masqué>'`). Cela s'applique aussi à la fixture `dsn` existante, qui avait le même
+   défaut depuis l'étape 3.
+
+### Vérification sur les vraies données (VPS, 25 septembre)
+
+**Contrôle `check-data`** (13 s) :
+- aucune orientation joueur 1 / joueur 2 inversée sur les 834 (MKX) et 831 (MK3) matchs comparés
+  entre direct et résultats officiels ;
+- aucun score incohérent ;
+- seules les égalités sont exclues (12 et 25 matchs) ;
+- aucun désaccord entre le finish vu en direct et le finish officiel ;
+- durées connues pour 99 à 100 % des manches vues en direct.
+
+**Évaluation complète** : 6 min 30 sur 1 vCPU, 500 Mo de mémoire. Le collecteur est resté
+`healthy`, à ≈ 3 % de CPU.
+
+| Cible | Verdict |
+|---|---|
+| Vainqueur de manche MKX | **Aucun avantage détecté** : poids du modèle −0,03 [−0,52 ; +0,40], log-loss du modèle seul 0,6695 contre 0,6636 pour le marché |
+| Vainqueur de manche MK3 | **Aucun avantage détecté** : poids 0,01 [−0,68 ; +0,70] ; backtest −11,2 % sur 616 paris |
+| Type de finish MK3 | **Signal prometteur, non démontré** (détail ci-dessous) |
+| Durée de manche MKX | **Préliminaire** : écart de log-loss −0,0003 [−0,002 ; +0,0015], 104 paris à −3,8 % |
+
+**Détail du type de finish MK3** :
+- log-loss du modèle 1,118 ;
+- marché 1,139 (multiplicatif) ou 1,134 (power) ;
+- fréquences historiques constantes 1,138 : le marché fait à peine mieux qu'elles, avec des cotes
+  des finishes rares quasiment figées (écart-type de 0,001 à 0,010) ;
+- poids du modèle 0,77 [0,56 ; 1,08] ;
+- écart combinaison − marché recalibré −0,016 [−0,020 ; −0,012].
+
+Mais le backtest à cotes réelles perd 9,4 % sur 1 267 paris (IC [−35 % ; +17 %]). La règle
+d'espérance maximale a surtout parié sur des issues rares à grosse cote : Babality à 38,5 de cote
+moyenne (−54 %), Friendship à 42,8 (+16 %), Brutality à 12,6 (+31 %). C'est du bruit de loterie.
+Le gain en qualité de probabilité est réel ; **aucun avantage de pari n'est démontré**. Il est
+consigné qu'il ne faut pas réajuster la règle de pari sur cette même fenêtre de test. Une règle
+prudente (R/F/B seulement, seuil plus élevé) devra être fixée à l'avance et jugée sur des données
+futures.
+
+**Comptabilité honnête des essais** : deux exécutions d'essai (versions « essai » et « essai2 »)
+ont précédé l'exécution officielle sur les mêmes données. Elles sont reprises dans le registre
+`reports/forecasting/trials.jsonl`, et les intervalles de confiance du rapport officiel sont
+ajustés en conséquence.
+
+### Salon Telegram « Prédiction Mortal Kombat »
+
+Groupe créé par l'utilisateur, bot ajouté ; identifiant `-5371276826`, récupéré par `getUpdates`
+sans afficher le jeton. Décision de l'utilisateur : **publier le bilan de chaque évaluation, pas de
+prédiction manche par manche** tant qu'aucun avantage n'est démontré. Implémentation :
+- `forecasting/notify.py`, qui réutilise `MatchFeedSender` (jamais bloquant) ;
+- variable `TELEGRAM_PREDICTION_CHAT_ID` ;
+- le service `ml` ne reçoit que cette variable et le jeton du bot, jamais le reste du `.env` ;
+- les tests neutralisent ces variables, car le conteneur de tests charge le vrai `.env`.
+
+## 39. [CONTEXTE-EN-COURS] Mandat « super administrateur » : prédictions en direct sur Telegram (2026-09-25)
+
+> **Repère pour reprendre le travail après une coupure ou une compaction du contexte.** Cette
+> section décrit le travail en cours et est mise à jour à chaque étape. Chercher
+> `[CONTEXTE-EN-COURS]` dans ce fichier.
+
+**Mandat** (2026-09-25, ≈ 19 h UTC) : l'utilisateur s'absente (machine locale programmée pour
+s'éteindre ≈ 3 h plus tard) et donne le rôle de super administrateur : « aller jusqu'au bout ». Il
+veut voir apparaître dans le groupe Telegram « Prédiction Mortal Kombat » (`-5371276826`) les
+**prédictions avec leur probabilité**, puis **si la prédiction était bonne ou pas**. Consigne :
+mettre à jour Memoire.md constamment.
+
+Cette demande remplace la décision précédente (bilan seulement). Garde-fou maintenu, parce que
+c'est ce que disent les résultats de la section 38 : chaque message porte la mention « aucun
+avantage de pari démontré — ne pas parier ».
+
+**Conception retenue** : un service `predictor` séparé du collecteur (image `ml`, profil
+compose « ml », `restart: unless-stopped`, 0,5 vCPU, 1 Go), sans aucun risque pour la collecte.
+- Lecture seule de la base, interrogée toutes les ≈ 5 s. L'état des messages publiés est gardé
+  dans le volume `ml_artifacts` (`live_state.json`), sans aucune écriture en base.
+- Modèles chargés depuis la dernière exécution officielle (`ml_artifacts/<run>/*.joblib`).
+- Un message par match, édité à chaque manche : P(vainqueur) du modèle à côté de celle du marché,
+  finish le plus probable (MK3), puis ✅/❌ dès que la manche est jouée.
+
+**Avancement** (à tenir à jour) :
+- [x] Pipeline d'évaluation (section 38) écrit et testé ; 1re passe complète : 338 tests réussis.
+- [x] Service `predictor` écrit (`src/forecasting/live.py`, commande `python -m forecasting live`, service compose `predictor`) + 7 tests (dont un match suivi manche par manche sur vraie base).
+- [x] Commit + push de point de sauvegarde (pipeline + service).
+- [ ] Exécution officielle sur le VPS (modèles dans `ml_artifacts`), rapport rapatrié.
+- [ ] Déploiement sur le VPS + vérification réelle dans le groupe Telegram.
+- [ ] Deux passes complètes de tests, commit + push final, clôture de cette section.
