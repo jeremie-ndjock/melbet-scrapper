@@ -304,12 +304,18 @@ class LivePredictor:
         for key, m in self.state.items():
             if not m.get("dirty") or not m["rounds"] or time.monotonic() < self.retry_at.get(key, 0):
                 continue
+            first = m["message_id"] is None
             message_id = await self.sender.send_or_edit(self.chat_id, m["message_id"], render_message(m))
             if message_id is None:
                 self.retry_at[key] = time.monotonic() + RETRY_AFTER_FAILURE_SECONDS
+                log.warning("publication en échec pour le match %s, nouvel essai dans %.0f s", key, RETRY_AFTER_FAILURE_SECONDS)
                 continue
             m["message_id"], m["dirty"] = message_id, False
             sent += 1
+            if first:
+                log.info("nouveau message de prédiction : match %s (%s)", key, " VS ".join(m["names"]))
+            if m["done"]:
+                log.info("match %s terminé : %d manche(s) prédite(s)", key, len(m["rounds"]))
         return sent
 
     def _forget_old(self) -> None:
