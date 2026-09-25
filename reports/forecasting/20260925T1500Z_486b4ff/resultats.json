@@ -1,0 +1,807 @@
+{
+  "as_of": "2026-09-25T15:00:00+00:00",
+  "git_commit": "486b4ff",
+  "lag_minutes": 18.0,
+  "qualite": {
+    "1252965": {
+      "couverture_duree_par_manche": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 1.0,
+        "5": 0.9988,
+        "6": 1.0,
+        "7": 0.9914,
+        "8": 0.9949,
+        "9": 0.9951
+      },
+      "debut_cotes": "2026-09-22T17:25:35+00:00",
+      "exclus_egalite": 12,
+      "exclus_orientation_inversee": 0,
+      "exclus_sans_manches": 0,
+      "exclus_score_incoherent": 0,
+      "exclus_trous_manches": 0,
+      "exclus_vainqueur_manche_inconnu": 0,
+      "finish_desaccord_direct_officiel": 0,
+      "identifiants_a_plusieurs_noms": 0,
+      "lignes_de_cotes": 117231,
+      "manches_brutes": 194459,
+      "manches_retenues": 194419,
+      "manches_sans_finish": 0,
+      "matchs_bruts": 26673,
+      "matchs_compares_direct": 834,
+      "matchs_retenus": 26661
+    },
+    "2282406": {
+      "couverture_duree_par_manche": {
+        "1": 1.0,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 0.9988,
+        "5": 0.9988,
+        "6": 0.9973,
+        "7": 0.9913,
+        "8": 0.9947,
+        "9": 1.0
+      },
+      "debut_cotes": "2026-09-22T17:25:37+00:00",
+      "exclus_egalite": 25,
+      "exclus_orientation_inversee": 0,
+      "exclus_sans_manches": 0,
+      "exclus_score_incoherent": 0,
+      "exclus_trous_manches": 0,
+      "exclus_vainqueur_manche_inconnu": 0,
+      "finish_desaccord_direct_officiel": 0,
+      "identifiants_a_plusieurs_noms": 0,
+      "lignes_de_cotes": 122402,
+      "manches_brutes": 191289,
+      "manches_retenues": 191185,
+      "manches_sans_finish": 0,
+      "matchs_bruts": 26251,
+      "matchs_compares_direct": 831,
+      "matchs_retenus": 26226
+    },
+    "delai_disponibilite": {
+      "mediane_duree_match_s": 725.354444,
+      "p99_duree_match_s": 1068.15234
+    }
+  },
+  "resultats": [
+    {
+      "backtest": {
+        "cote_moyenne": null,
+        "creux_max": 0.0,
+        "echantillon_insuffisant": true,
+        "ic_bas": null,
+        "ic_haut": null,
+        "mise_totale": 0.0,
+        "n_paris": 0,
+        "n_requis": null,
+        "par_issue": {},
+        "rendement": null,
+        "resultat": 0.0,
+        "taux_reussite": null
+      },
+      "base_validation": 0.687818,
+      "cible": "vainqueur",
+      "controle_etiquettes": {
+        "classes": [
+          {
+            "classe": 0,
+            "frequence": 0.453746,
+            "p_marche": 0.449657,
+            "z": 0.518419
+          },
+          {
+            "classe": 1,
+            "frequence": 0.546254,
+            "p_marche": 0.550343,
+            "z": -0.518419
+          }
+        ],
+        "ok": true
+      },
+      "delta": {
+        "alpha": 0.016667,
+        "ic_bas": -8.5e-05,
+        "ic_haut": 0.000173,
+        "moyenne": 4.1e-05
+      },
+      "delta_marche_brut": {
+        "alpha": 0.016667,
+        "ic_bas": -0.000627,
+        "ic_haut": 0.001128,
+        "moyenne": 0.000234
+      },
+      "k": 3,
+      "ligue": 1252965,
+      "marge_moyenne": 0.033934,
+      "modele_retenu": "LightGBM",
+      "n_calage": 2021,
+      "n_test": 3978,
+      "n_train": 173574,
+      "notes": [
+        "Cotes écartées car postérieures à la manche : 0"
+      ],
+      "poids_modele": -0.034165,
+      "poids_modele_ic": [
+        -0.522065,
+        0.394557
+      ],
+      "scores": {
+        "Combinaison modèle + marché": {
+          "brier": 0.472009,
+          "ece_quantile": 0.023472,
+          "ece_uniforme": 0.018536,
+          "intervalles_non_vides": 0.6,
+          "log_loss": 0.663856,
+          "n": 3978
+        },
+        "Fréquences de base (historique)": {
+          "brier": 0.495734,
+          "ece_quantile": 0.002509,
+          "ece_uniforme": 0.002509,
+          "intervalles_non_vides": 0.05,
+          "log_loss": 0.688875,
+          "n": 3978
+        },
+        "Marché brut (marge retirée)": {
+          "brier": 0.471735,
+          "ece_quantile": 0.021216,
+          "ece_uniforme": 0.012699,
+          "intervalles_non_vides": 0.6,
+          "log_loss": 0.663621,
+          "n": 3978
+        },
+        "Marché recalibré": {
+          "brier": 0.471972,
+          "ece_quantile": 0.023569,
+          "ece_uniforme": 0.01917,
+          "intervalles_non_vides": 0.6,
+          "log_loss": 0.663815,
+          "n": 3978
+        },
+        "Modèle seul": {
+          "brier": 0.477253,
+          "ece_quantile": 0.029102,
+          "ece_uniforme": 0.013466,
+          "intervalles_non_vides": 0.6,
+          "log_loss": 0.669471,
+          "n": 3978
+        }
+      },
+      "scores_validation": {
+        "LightGBM": {
+          "brier": 0.477601,
+          "ece_quantile": 0.020215,
+          "ece_uniforme": 0.016354,
+          "intervalles_non_vides": 0.65,
+          "log_loss": 0.66984,
+          "n": 7376
+        },
+        "régression logistique": {
+          "brier": 0.480614,
+          "ece_quantile": 0.026437,
+          "ece_uniforme": 0.021314,
+          "intervalles_non_vides": 0.6,
+          "log_loss": 0.673155,
+          "n": 7376
+        }
+      },
+      "tau": 0.02,
+      "titre": "Vainqueur de manche — Mortal Kombat X",
+      "validation_glissante": [
+        {
+          "base": 0.688652,
+          "heure": 0.675647,
+          "modele": 0.675699,
+          "n": 14648,
+          "semaine": "2026-08-04T17:25:35+00:00",
+          "series": 0.675818
+        },
+        {
+          "base": 0.688533,
+          "heure": 0.674233,
+          "modele": 0.674218,
+          "n": 14522,
+          "semaine": "2026-08-11T17:25:35+00:00",
+          "series": 0.674224
+        },
+        {
+          "base": 0.687644,
+          "heure": 0.673029,
+          "modele": 0.672936,
+          "n": 14677,
+          "semaine": "2026-08-18T17:25:35+00:00",
+          "series": 0.673056
+        },
+        {
+          "base": 0.688899,
+          "heure": 0.67526,
+          "modele": 0.675263,
+          "n": 14617,
+          "semaine": "2026-08-25T17:25:35+00:00",
+          "series": 0.675215
+        },
+        {
+          "base": 0.688183,
+          "heure": 0.671898,
+          "modele": 0.672109,
+          "n": 14531,
+          "semaine": "2026-09-01T17:25:35+00:00",
+          "series": 0.672168
+        },
+        {
+          "base": 0.68749,
+          "heure": 0.673985,
+          "modele": 0.674024,
+          "n": 14639,
+          "semaine": "2026-09-08T17:25:35+00:00",
+          "series": 0.673965
+        }
+      ],
+      "variabilite_marche": [
+        0.101389,
+        0.101389
+      ],
+      "verdict": "Aucun avantage détecté"
+    },
+    {
+      "backtest": {
+        "cote_moyenne": 1.955587,
+        "creux_max": 13920.0,
+        "echantillon_insuffisant": true,
+        "ic_bas": -0.207678,
+        "ic_haut": 0.118701,
+        "mise_totale": 104000.0,
+        "n_paris": 104,
+        "n_requis": 4159,
+        "par_issue": {
+          "moins": {
+            "cote_moyenne": 1.95292,
+            "n_paris": 88,
+            "rendement": -0.065966,
+            "resultat": -5805.0
+          },
+          "plus": {
+            "cote_moyenne": 1.97025,
+            "n_paris": 16,
+            "rendement": 0.118,
+            "resultat": 1888.0
+          }
+        },
+        "rendement": -0.037663,
+        "resultat": -3917.0,
+        "taux_reussite": 0.490385
+      },
+      "cible": "duree",
+      "controle_etiquettes": {
+        "classes": [
+          {
+            "classe": 0,
+            "frequence": 0.491005,
+            "p_marche": 0.500899,
+            "z": -1.053618
+          },
+          {
+            "classe": 1,
+            "frequence": 0.508995,
+            "p_marche": 0.499101,
+            "z": 1.053618
+          }
+        ],
+        "ok": true
+      },
+      "delta": {
+        "alpha": 0.016667,
+        "ic_bas": -0.002347,
+        "ic_haut": 0.00186,
+        "moyenne": -0.000341
+      },
+      "delta_marche_brut": {
+        "alpha": 0.016667,
+        "ic_bas": -0.002572,
+        "ic_haut": 0.001782,
+        "moyenne": -0.000481
+      },
+      "k": 3,
+      "ligue": 1252965,
+      "marge_moyenne": 0.025825,
+      "modele_retenu": "régression logistique (variables fixées à l'avance)",
+      "n_test": 2835,
+      "n_train": 3003,
+      "notes": [
+        "Ici le modèle inclut directement la cote du marché parmi ses variables : il est comparé au marché seul recalibré (même protocole), le poids de combinaison est donc sans objet.",
+        "Cotes écartées car postérieures à la manche : 0"
+      ],
+      "poids_modele": null,
+      "poids_modele_ic": [
+        null,
+        null
+      ],
+      "preliminaire": true,
+      "scores": {
+        "Marché brut (marge retirée)": {
+          "brier": 0.500451,
+          "ece_quantile": 0.041312,
+          "ece_uniforme": 0.021902,
+          "intervalles_non_vides": 0.15,
+          "log_loss": 0.693598,
+          "n": 2835
+        },
+        "Marché recalibré": {
+          "brier": 0.500311,
+          "ece_quantile": 0.039187,
+          "ece_uniforme": 0.020942,
+          "intervalles_non_vides": 0.15,
+          "log_loss": 0.693458,
+          "n": 2835
+        },
+        "Modèle (inclut la cote du marché)": {
+          "brier": 0.49997,
+          "ece_quantile": 0.034492,
+          "ece_uniforme": 0.013683,
+          "intervalles_non_vides": 0.3,
+          "log_loss": 0.693117,
+          "n": 2835
+        }
+      },
+      "tau": 0.05,
+      "titre": "Durée de manche — Mortal Kombat X (P(durée > ligne principale))",
+      "verdict": "Signal prometteur, non démontré"
+    },
+    {
+      "backtest": {
+        "cote_moyenne": 2.630904,
+        "creux_max": 84998.0,
+        "echantillon_insuffisant": true,
+        "ic_bas": -0.202847,
+        "ic_haut": -0.017211,
+        "mise_totale": 616000.0,
+        "n_paris": 616,
+        "n_requis": 6618,
+        "par_issue": {
+          "joueur 2": {
+            "cote_moyenne": 2.630904,
+            "n_paris": 616,
+            "rendement": -0.111857,
+            "resultat": -68904.0
+          }
+        },
+        "rendement": -0.111857,
+        "resultat": -68904.0,
+        "taux_reussite": 0.349026
+      },
+      "base_validation": 0.690605,
+      "cible": "vainqueur",
+      "controle_etiquettes": {
+        "classes": [
+          {
+            "classe": 0,
+            "frequence": 0.533963,
+            "p_marche": 0.536158,
+            "z": -0.27546
+          },
+          {
+            "classe": 1,
+            "frequence": 0.466037,
+            "p_marche": 0.463842,
+            "z": 0.27546
+          }
+        ],
+        "ok": true
+      },
+      "delta": {
+        "alpha": 0.016667,
+        "ic_bas": -1.9e-05,
+        "ic_haut": 2.4e-05,
+        "moyenne": 3e-06
+      },
+      "delta_marche_brut": {
+        "alpha": 0.016667,
+        "ic_bas": 0.000137,
+        "ic_haut": 0.003372,
+        "moyenne": 0.001776
+      },
+      "k": 3,
+      "ligue": 2282406,
+      "marge_moyenne": 0.075656,
+      "modele_retenu": "régression logistique",
+      "n_calage": 2017,
+      "n_test": 3916,
+      "n_train": 171390,
+      "notes": [
+        "Cotes écartées car postérieures à la manche : 0"
+      ],
+      "poids_modele": 0.009132,
+      "poids_modele_ic": [
+        -0.683643,
+        0.698969
+      ],
+      "scores": {
+        "Combinaison modèle + marché": {
+          "brier": 0.470231,
+          "ece_quantile": 0.033737,
+          "ece_uniforme": 0.027424,
+          "intervalles_non_vides": 0.7,
+          "log_loss": 0.662515,
+          "n": 3916
+        },
+        "Fréquences de base (historique)": {
+          "brier": 0.497697,
+          "ece_quantile": 0.00136,
+          "ece_uniforme": 0.00136,
+          "intervalles_non_vides": 0.05,
+          "log_loss": 0.690842,
+          "n": 3916
+        },
+        "Marché brut (marge retirée)": {
+          "brier": 0.468514,
+          "ece_quantile": 0.025652,
+          "ece_uniforme": 0.020102,
+          "intervalles_non_vides": 0.75,
+          "log_loss": 0.660739,
+          "n": 3916
+        },
+        "Marché recalibré": {
+          "brier": 0.470229,
+          "ece_quantile": 0.034716,
+          "ece_uniforme": 0.026565,
+          "intervalles_non_vides": 0.75,
+          "log_loss": 0.662512,
+          "n": 3916
+        },
+        "Modèle seul": {
+          "brier": 0.471358,
+          "ece_quantile": 0.026122,
+          "ece_uniforme": 0.023958,
+          "intervalles_non_vides": 0.6,
+          "log_loss": 0.663827,
+          "n": 3916
+        }
+      },
+      "scores_validation": {
+        "LightGBM": {
+          "brier": 0.472483,
+          "ece_quantile": 0.020097,
+          "ece_uniforme": 0.010764,
+          "intervalles_non_vides": 0.65,
+          "log_loss": 0.664918,
+          "n": 6874
+        },
+        "régression logistique": {
+          "brier": 0.472469,
+          "ece_quantile": 0.020646,
+          "ece_uniforme": 0.009119,
+          "intervalles_non_vides": 0.65,
+          "log_loss": 0.664901,
+          "n": 6874
+        }
+      },
+      "tau": 0.02,
+      "titre": "Vainqueur de manche — Mortal Kombat 3",
+      "validation_glissante": [
+        {
+          "base": 0.690831,
+          "heure": 0.665307,
+          "modele": 0.665376,
+          "n": 14424,
+          "semaine": "2026-08-04T17:25:37+00:00",
+          "series": 0.665241
+        },
+        {
+          "base": 0.69039,
+          "heure": 0.670209,
+          "modele": 0.670072,
+          "n": 14517,
+          "semaine": "2026-08-11T17:25:37+00:00",
+          "series": 0.670195
+        },
+        {
+          "base": 0.692005,
+          "heure": 0.663868,
+          "modele": 0.664488,
+          "n": 13789,
+          "semaine": "2026-08-18T17:25:37+00:00",
+          "series": 0.663954
+        },
+        {
+          "base": 0.690276,
+          "heure": 0.663608,
+          "modele": 0.663405,
+          "n": 14526,
+          "semaine": "2026-08-25T17:25:37+00:00",
+          "series": 0.663649
+        },
+        {
+          "base": 0.690632,
+          "heure": 0.668455,
+          "modele": 0.668467,
+          "n": 14522,
+          "semaine": "2026-09-01T17:25:37+00:00",
+          "series": 0.668531
+        },
+        {
+          "base": 0.689999,
+          "heure": 0.671247,
+          "modele": 0.671279,
+          "n": 14662,
+          "semaine": "2026-09-08T17:25:37+00:00",
+          "series": 0.671205
+        }
+      ],
+      "variabilite_marche": [
+        0.11023,
+        0.11023
+      ],
+      "verdict": "Aucun avantage détecté"
+    },
+    {
+      "backtest": {
+        "cote_moyenne": 29.775288,
+        "creux_max": 319040.0,
+        "echantillon_insuffisant": true,
+        "ic_bas": -0.351269,
+        "ic_haut": 0.174409,
+        "mise_totale": 1267000.0,
+        "n_paris": 1267,
+        "n_requis": 96385,
+        "par_issue": {
+          "An": {
+            "cote_moyenne": 46.465517,
+            "n_paris": 58,
+            "rendement": -0.224138,
+            "resultat": -13000.0
+          },
+          "B": {
+            "cote_moyenne": 12.627747,
+            "n_paris": 364,
+            "rendement": 0.313187,
+            "resultat": 114000.0
+          },
+          "Ba": {
+            "cote_moyenne": 38.537946,
+            "n_paris": 448,
+            "rendement": -0.542411,
+            "resultat": -243000.0
+          },
+          "F": {
+            "cote_moyenne": 4.941383,
+            "n_paris": 94,
+            "rendement": -0.155106,
+            "resultat": -14580.0
+          },
+          "Fr": {
+            "cote_moyenne": 42.791096,
+            "n_paris": 292,
+            "rendement": 0.164384,
+            "resultat": 48000.0
+          },
+          "Hk": {
+            "cote_moyenne": 20.7,
+            "n_paris": 10,
+            "rendement": -1.0,
+            "resultat": -10000.0
+          },
+          "R": {
+            "cote_moyenne": 2.3,
+            "n_paris": 1,
+            "rendement": -1.0,
+            "resultat": -1000.0
+          }
+        },
+        "rendement": -0.09438,
+        "resultat": -119580.0,
+        "taux_reussite": 0.056827
+      },
+      "base_validation": 1.11948,
+      "cible": "finish",
+      "controle_etiquettes": {
+        "classes": [
+          {
+            "classe": 0,
+            "frequence": 0.475996,
+            "p_marche": 0.4642,
+            "z": 1.480127
+          },
+          {
+            "classe": 1,
+            "frequence": 0.381256,
+            "p_marche": 0.368097,
+            "z": 1.707397
+          },
+          {
+            "classe": 2,
+            "frequence": 0.097038,
+            "p_marche": 0.086074,
+            "z": 2.446295
+          },
+          {
+            "classe": 3,
+            "frequence": 0.024259,
+            "p_marche": 0.026242,
+            "z": -0.775993
+          },
+          {
+            "classe": 4,
+            "frequence": 0.013534,
+            "p_marche": 0.019867,
+            "z": -2.839748
+          },
+          {
+            "classe": 5,
+            "frequence": 0.006639,
+            "p_marche": 0.017243,
+            "z": -5.097461
+          },
+          {
+            "classe": 6,
+            "frequence": 0.001277,
+            "p_marche": 0.018277,
+            "z": -7.942063
+          }
+        ],
+        "ok": true
+      },
+      "delta": {
+        "alpha": 0.016667,
+        "ic_bas": -0.020328,
+        "ic_haut": -0.011171,
+        "moyenne": -0.015782
+      },
+      "delta_marche_brut": {
+        "alpha": 0.016667,
+        "ic_bas": -0.025585,
+        "ic_haut": -0.017005,
+        "moyenne": -0.021359
+      },
+      "k": 3,
+      "ligue": 2282406,
+      "marge_moyenne": 0.168992,
+      "modele_retenu": "régression logistique",
+      "n_calage": 2017,
+      "n_test": 3916,
+      "n_train": 171390,
+      "notes": [
+        "Cotes écartées car postérieures à la manche : 0",
+        "Aucune pondération des classes rares (elle fausserait les probabilités) : un rappel proche de 0 sur Hara-Kiri ou Animality est attendu d'un modèle bien calibré.",
+        "Environ 0,15 % de Hara-Kiri : aucun chiffre par classe n'est significatif pour les classes rares."
+      ],
+      "poids_modele": 0.766142,
+      "poids_modele_ic": [
+        0.56161,
+        1.075724
+      ],
+      "scores": {
+        "Combinaison modèle + marché": {
+          "brier": 0.60785,
+          "ece_quantile": 0.012844,
+          "ece_uniforme": 0.006186,
+          "intervalles_non_vides": 0.171429,
+          "log_loss": 1.117628,
+          "n": 3916
+        },
+        "Fréquences de base (historique)": {
+          "brier": 0.618018,
+          "ece_quantile": 0.003214,
+          "ece_uniforme": 0.003214,
+          "intervalles_non_vides": 0.05,
+          "log_loss": 1.138335,
+          "n": 3916
+        },
+        "Marché brut (marge retirée)": {
+          "brier": 0.60817,
+          "ece_quantile": 0.017296,
+          "ece_uniforme": 0.011816,
+          "intervalles_non_vides": 0.185714,
+          "log_loss": 1.138987,
+          "n": 3916
+        },
+        "Marché brut (méthode power)": {
+          "brier": 0.609306,
+          "ece_quantile": 0.01716,
+          "ece_uniforme": 0.012793,
+          "intervalles_non_vides": 0.2,
+          "log_loss": 1.133897,
+          "n": 3916
+        },
+        "Marché recalibré": {
+          "brier": 0.608631,
+          "ece_quantile": 0.016145,
+          "ece_uniforme": 0.011308,
+          "intervalles_non_vides": 0.192857,
+          "log_loss": 1.13341,
+          "n": 3916
+        },
+        "Modèle seul": {
+          "brier": 0.608274,
+          "ece_quantile": 0.011483,
+          "ece_uniforme": 0.005394,
+          "intervalles_non_vides": 0.185714,
+          "log_loss": 1.118139,
+          "n": 3916
+        }
+      },
+      "scores_validation": {
+        "LightGBM": {
+          "brier": 0.597965,
+          "ece_quantile": 0.009131,
+          "ece_uniforme": 0.004621,
+          "intervalles_non_vides": 0.164286,
+          "log_loss": 1.096596,
+          "n": 6874
+        },
+        "régression logistique": {
+          "brier": 0.597331,
+          "ece_quantile": 0.01009,
+          "ece_uniforme": 0.006403,
+          "intervalles_non_vides": 0.171429,
+          "log_loss": 1.095366,
+          "n": 6874
+        }
+      },
+      "tau": 0.0,
+      "titre": "Type de finish — Mortal Kombat 3 (7 classes)",
+      "validation_glissante": [
+        {
+          "base": 1.121354,
+          "heure": 1.101084,
+          "modele": 1.101155,
+          "n": 14424,
+          "semaine": "2026-08-04T17:25:37+00:00",
+          "series": 1.10094
+        },
+        {
+          "base": 1.127826,
+          "heure": 1.109433,
+          "modele": 1.109023,
+          "n": 14517,
+          "semaine": "2026-08-11T17:25:37+00:00",
+          "series": 1.109273
+        },
+        {
+          "base": 1.113842,
+          "heure": 1.092113,
+          "modele": 1.092171,
+          "n": 13789,
+          "semaine": "2026-08-18T17:25:37+00:00",
+          "series": 1.092382
+        },
+        {
+          "base": 1.115784,
+          "heure": 1.096224,
+          "modele": 1.096061,
+          "n": 14526,
+          "semaine": "2026-08-25T17:25:37+00:00",
+          "series": 1.096336
+        },
+        {
+          "base": 1.121807,
+          "heure": 1.104841,
+          "modele": 1.104548,
+          "n": 14522,
+          "semaine": "2026-09-01T17:25:37+00:00",
+          "series": 1.104708
+        },
+        {
+          "base": 1.116471,
+          "heure": 1.095185,
+          "modele": 1.095316,
+          "n": 14662,
+          "semaine": "2026-09-08T17:25:37+00:00",
+          "series": 1.095985
+        }
+      ],
+      "variabilite_marche": [
+        0.070962,
+        0.080217,
+        0.013936,
+        0.009704,
+        0.005334,
+        0.00095,
+        0.007382
+      ],
+      "verdict": "Signal prometteur, non démontré"
+    }
+  ]
+}

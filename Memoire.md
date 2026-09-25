@@ -2106,6 +2106,15 @@ ont précédé l'exécution officielle sur les mêmes données. Elles sont repri
 `reports/forecasting/trials.jsonl`, et les intervalles de confiance du rapport officiel sont
 ajustés en conséquence.
 
+**Exécution officielle** : version `486b4ff`, `as_of` = 2026-09-25 15:00 UTC, rapport versionné
+dans `reports/forecasting/20260925T1500Z_486b4ff/`, K = 3. Mêmes chiffres que les essais,
+intervalles un peu plus larges. Pour le type de finish MK3, l'écart combinaison − marché
+recalibré vaut −0,0158 [−0,0203 ; −0,0112]. Bilan envoyé dans le groupe Telegram (réponse 200).
+Modèles retenus enregistrés dans le volume `ml_artifacts` :
+- vainqueur MKX : LightGBM ;
+- vainqueur MK3 : régression logistique ;
+- finish MK3 : régression logistique.
+
 ### Salon Telegram « Prédiction Mortal Kombat »
 
 Groupe créé par l'utilisateur, bot ajouté ; identifiant `-5371276826`, récupéré par `getUpdates`
@@ -2140,10 +2149,36 @@ compose « ml », `restart: unless-stopped`, 0,5 vCPU, 1 Go), sans aucun risque 
 - Un message par match, édité à chaque manche : P(vainqueur) du modèle à côté de celle du marché,
   finish le plus probable (MK3), puis ✅/❌ dès que la manche est jouée.
 
+**Réalisé et vérifié en production (25 septembre, ≈ 19 h UTC)** :
+- Service `predictor` démarré sur le VPS (`docker compose --profile ml up -d --no-build predictor`).
+  Il charge les modèles de l'exécution officielle et recharge l'historique toutes les 30 min
+  (≈ 26 700 matchs par ligue). Dès la première minute, 7 messages ont été publiés dans le groupe,
+  puis environ 3 envois ou éditions par minute, tous acceptés par Telegram (200 OK).
+- Contrôle du fichier d'état après une dizaine de minutes : 22 manches prédites, **toutes avec la
+  cote du marché relevée au moment de la prédiction**. Le marché d'une manche se fermant à son
+  début, chaque prédiction est bien publiée AVANT la manche. 15 manches résolues : vainqueur juste
+  9 fois sur 15, finish juste 2 fois sur 7 (échantillon anecdotique, sans valeur statistique).
+- Un redémarrage reprend exactement l'état (aucun message en double), vérifié en redéployant.
+
+**Vrai défaut de sécurité trouvé en production et corrigé** : le jeton du bot Telegram apparaissait
+en clair dans les journaux Docker du collecteur (depuis la mise en place du fil de match) et du
+nouveau service.
+- Cause : httpx journalise l'URL de chaque requête sous forme d'objet `URL`, et le filtre de
+  masquage de `logging_setup.py` ne traitait que les arguments de type chaîne.
+- Correction : le masquage porte désormais sur le message entièrement formaté et sur le texte des
+  exceptions. Commit `bcfb6db`, 3 tests ajoutés, déployé sur le collecteur et le service.
+- Vérifié : 0 occurrence du jeton dans les journaux produits après le déploiement, remplacé par
+  `bot<masqué>`.
+- **Reste** : les journaux Docker antérieurs du conteneur `scraper` (fichiers json-file, rotation
+  10 × 10 Mo) contiennent encore le jeton jusqu'à leur rotation. Si un doute existe sur l'accès au
+  VPS, régénérer le jeton auprès de @BotFather puis mettre à jour les deux `.env`.
+
 **Avancement** (à tenir à jour) :
 - [x] Pipeline d'évaluation (section 38) écrit et testé ; 1re passe complète : 338 tests réussis.
 - [x] Service `predictor` écrit (`src/forecasting/live.py`, commande `python -m forecasting live`, service compose `predictor`) + 7 tests (dont un match suivi manche par manche sur vraie base).
 - [x] Commit + push de point de sauvegarde (pipeline + service).
-- [ ] Exécution officielle sur le VPS (modèles dans `ml_artifacts`), rapport rapatrié.
-- [ ] Déploiement sur le VPS + vérification réelle dans le groupe Telegram.
+- [x] Exécution officielle sur le VPS (modèles dans `ml_artifacts`), rapport rapatrié.
+- [x] Déploiement sur le VPS + vérification réelle (messages publiés, prédictions avant chaque manche).
+- [x] 2e passe complète de la suite : 345 tests réussis.
+- [ ] Contrôle de reproductibilité (2e exécution même `as_of`), nettoyage des essais sur le VPS, commit final.
 - [ ] Deux passes complètes de tests, commit + push final, clôture de cette section.
