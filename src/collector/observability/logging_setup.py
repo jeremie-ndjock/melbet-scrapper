@@ -27,12 +27,18 @@ class RedactSecretsFilter(logging.Filter):
         self._pattern = _build_redactor()
 
     def filter(self, record: logging.LogRecord) -> bool:
+        """Masque sur le message ENTIÈREMENT formaté : un secret peut arriver dans un argument qui
+        n'est pas une chaîne (httpx journalise l'URL de chaque requête sous forme d'objet ``URL``,
+        et l'URL de l'API Telegram contient le jeton du bot — trouvé en production le
+        2026-09-25) ou dans le texte d'une exception."""
         if self._pattern is not None:
-            record.msg = self._pattern.sub("<masqué>", str(record.msg))
-            if record.args:
-                record.args = tuple(
-                    self._pattern.sub("<masqué>", a) if isinstance(a, str) else a for a in record.args
-                )
+            try:
+                message = record.getMessage()
+            except (TypeError, ValueError):
+                message = f"{record.msg} {record.args}"
+            record.msg, record.args = self._pattern.sub("<masqué>", message), None
+            if record.exc_info:
+                record.exc_text = self._pattern.sub("<masqué>", logging.Formatter().formatException(record.exc_info))
         return True
 
 
@@ -48,7 +54,7 @@ class JsonFormatter(logging.Formatter):
             if hasattr(record, key):
                 payload[key] = getattr(record, key)
         if record.exc_info:
-            payload["exception"] = self.formatException(record.exc_info)
+            payload["exception"] = record.exc_text or self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)
 
 

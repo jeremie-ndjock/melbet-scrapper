@@ -202,7 +202,7 @@ class LivePredictor:
             self.history[league] = (m, r)
         self.history_loaded_at = time.monotonic()
         self.feat_cache.clear()
-        log.info("historique rechargé : %s", {k: len(v[0]) for k, v in self.history.items()})
+        log.info("historique rechargé : %s", ", ".join(f"{k}={len(v[0])} matchs" for k, v in self.history.items()))
 
     def _match_features(self, league: int, meta: dict) -> pd.Series:
         gid = meta["game_id"]

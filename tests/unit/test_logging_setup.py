@@ -60,7 +60,44 @@ def test_redact_filter_masks_secrets_in_args_too(monkeypatch):
     f = RedactSecretsFilter()
     record = make_record("valeur : %s", args=("secret-arg",))
     f.filter(record)
-    assert record.args[0] == "<masqué>"
+    assert record.getMessage() == "valeur : <masqué>"
+
+
+class _Url:
+    """Comme ``httpx.URL`` : un objet, pas une chaîne, dont le texte contient le jeton."""
+
+    def __str__(self):
+        return "https://api.telegram.org/bot123456:jeton-secret/sendMessage"
+
+
+def test_redact_filter_masks_secrets_hidden_in_non_string_args(monkeypatch):
+    """Trouvé en production le 2026-09-25 : httpx journalise l'URL de l'API Telegram (qui contient
+    le jeton du bot) sous forme d'objet, que l'ancien filtre ne masquait pas."""
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:jeton-secret")
+    f = RedactSecretsFilter()
+    record = make_record('HTTP Request: %s %s "%s"', args=("POST", _Url(), "HTTP/1.1 200 OK"))
+    f.filter(record)
+    assert "jeton-secret" not in record.getMessage()
+    assert "bot<masqué>/sendMessage" in record.getMessage()
+
+
+def test_redact_filter_keeps_a_single_mapping_argument_readable(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:jeton-secret")
+    record = make_record("historique : %s", args=({"a": 1},))
+    RedactSecretsFilter().filter(record)
+    assert record.getMessage() == "historique : {'a': 1}"
+
+
+def test_redact_filter_masks_secrets_in_exception_text(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:jeton-secret")
+    try:
+        raise RuntimeError("échec vers https://api.telegram.org/bot123456:jeton-secret/sendMessage")
+    except RuntimeError:
+        import sys
+        record = logging.LogRecord("collector.test", logging.ERROR, __file__, 1, "erreur", (), sys.exc_info())
+    RedactSecretsFilter().filter(record)
+    out = JsonFormatter().format(record)
+    assert "jeton-secret" not in out and "<masqué>" in out
 
 
 def test_redact_filter_is_a_no_op_when_no_secret_configured(monkeypatch):
