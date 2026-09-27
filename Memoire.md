@@ -2206,3 +2206,69 @@ au cycle suivant au lieu d'envoyer un nouveau message, en distinguant l'erreur r
   `live_state.json`, ou mieux, d'une table dédiée.
 - **Régénérer le jeton du bot** si un doute existe sur l'accès aux anciens journaux du VPS.
 - [ ] Deux passes complètes de tests, commit + push final, clôture de cette section.
+
+## 40. [CONTEXTE-EN-COURS] Réentraînement quotidien, prédiction de durée, règle prudente, bilan quotidien (2026-09-27/28)
+
+> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. Section mise à jour à chaque étape.
+
+Demande de l'utilisateur (27 septembre, après son retour) :
+1. réentraînement quotidien automatique des modèles, et ajout d'une prédiction de la **durée des
+   manches** (plus ou moins qu'une des lignes du marché) ;
+2. une règle de pari prudente pour le finish, **fixée à l'avance puis jugée sur de nouvelles
+   données** ;
+3. un bilan quotidien du taux de réussite des prédictions.
+
+### Enregistrement de la règle prudente (ne plus modifier)
+
+Enregistrée le 2026-09-27/28, AVANT tout jugement, dans `src/forecasting/rules.py`. La date du
+commit fait foi.
+
+- **Marché** : type de finish MK3 (`g=1066`), manches jouées à partir du **2026-09-29 00:00 UTC**
+  uniquement.
+- **Issues autorisées** : Regular, Fatality, Brutality. Jamais les issues rares (Babality,
+  Friendship, Animality, Hara-Kiri), qui relevaient de la loterie dans le backtest de la section 38.
+- **Condition** : probabilité du modèle (champion en service au moment de la prédiction) ≥
+  probabilité du marché marge retirée + 3 points, avec une espérance positive. Au plus un pari par
+  manche (espérance la plus haute).
+- **Mise** : fixe, 1 000 F fictifs, à la cote affichée au moment de la prédiction publiée.
+- **Verdict** :
+  - « avantage démontré » seulement si l'intervalle de confiance à **99 %** du rendement
+    (bootstrap par match) est entièrement positif, avec au moins 500 paris ;
+  - « règle perdante » s'il est entièrement négatif, avec au moins 500 paris ;
+  - « en cours » sinon.
+
+  Le 99 % (et non 95 %) compense le fait que le résultat est consulté chaque jour.
+- Toute variante ultérieure est un **nouvel essai**, avec sa propre date d'enregistrement.
+
+### Conception
+
+- **Réentraînement quotidien** (`src/forecasting/production.py`), lancé par la commande `run` après
+  l'évaluation, par une tâche cron à 4 h UTC sur le VPS :
+  - pour chaque cible (vainqueur MKX et MK3, finish MK3, durée MKX), un challenger est entraîné sur
+    tout sauf les 3 derniers jours ;
+  - J−3 à J−1 servent au calibrage et au choix du modèle ;
+  - le dernier jour, vu par aucun des deux modèles, sert d'examen ;
+  - le challenger est promu (`champion.json`) seulement si sa log-loss ≤ celle du champion + 0,002
+    et son ECE ≤ celle du champion + 0,01, avec un jour d'examen d'au moins 100 manches.
+- **Durée MKX en direct** :
+  - ligne principale du marché « Durée du Round » ;
+  - prédiction ajoutée **seulement tant que ce marché est encore ouvert**, donc avant le début de
+    la manche ;
+  - le modèle (régression logistique) inclut la cote du marché parmi ses variables ;
+  - résultat ✅ ou ❌ dès que la durée réelle est connue.
+- **Journal permanent** `predictions_log.jsonl` (volume `ml_artifacts`) : pour chaque manche
+  résolue, ce qu'annonçaient le modèle ET le marché au moment de la publication, avec les cotes.
+- **Bilan quotidien** publié peu après minuit UTC par le service `predictor` :
+  - taux de réussite du modèle et du favori du marché sur les mêmes manches, et log-loss des deux ;
+  - paris fictifs du jour et cumul de la règle prudente.
+- **Correction de la limite connue** : une édition en échec est retentée au lieu d'envoyer un
+  doublon. Un nouveau message n'est envoyé qu'après 5 échecs de suite. La réponse Telegram
+  « message is not modified » compte comme un succès (`MatchFeedSender.edit`).
+
+### Avancement
+- [x] Code : `rules.py`, `journal.py`, `production.py`, `live.py` (durée, journal, bilan, reprises),
+  commande `run --no-production`, rapport et bilan Telegram enrichis.
+- [ ] Tests (nouveaux et existants adaptés), deux passes complètes.
+- [ ] Déploiement : image `ml`, redémarrage de `predictor`, tâche cron à 4 h UTC, premier
+  réentraînement manuel pour créer les champions.
+- [ ] Vérification réelle (durée dans les messages, champions chargés), commit + push, clôture.
