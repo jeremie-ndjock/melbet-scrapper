@@ -2323,9 +2323,9 @@ rapport `reports/forecasting/20260927T2100Z_5f94fb7/`) :
 
 Aucun avantage de pari n'est démontré : la mention « ne pas parier » reste justifiée.
 
-## 41. [CONTEXTE-EN-COURS] Suivi après mise en production : guide Grafana/Prometheus, mention des messages (2026-09-28)
+## 41. [CONTEXTE-EN-COURS] Suivi après mise en production : guide Grafana/Prometheus, mention des messages (2026-09-28) — TERMINÉ
 
-> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. **État au 28 septembre, ≈ 1 h 45 UTC**.
+> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. **État au 28 septembre, ≈ 2 h UTC : terminé**, rien en cours. Seul point en attente : la décision de l'utilisateur sur la surveillance des ligues AI Table Tennis.
 
 **Guide d'utilisation de Grafana et Prometheus** (demandé par l'utilisateur), rédigé dans un
 document Claude Docs, et non dans le dépôt :
@@ -2380,6 +2380,13 @@ Reste à faire :
   - les copies des rapports officiels sont versionnées dans `docs/forecasting/rapports/` (les
     deux rapports déjà faits y ont été déplacés avec `git mv`) ;
   - pour la transition, le dossier du VPS est mis de côté pendant le pull puis remis en place ;
-- [ ] sur le VPS : pull de transition, puis `docker compose --profile ml build ml` et
-  `docker compose --profile ml up -d --no-build predictor` ;
-- [ ] vérifier la nouvelle mention dans un message.
+- [x] sur le VPS, commit `51c5b0c` :
+  - dossier de travail mis de côté, pull, puis dossier remis en place avec l'uid 10001 et ses 16
+    lignes de registre intactes ;
+  - Git a supprimé le dossier parent `reports/`, devenu vide : la remise en place a échoué une
+    première fois, sans perte (sauvegarde intacte), puis le dossier a été recréé ;
+  - image `ml` reconstruite, `predictor` redémarré, 0 erreur ;
+- [x] vérifié : un message rendu depuis l'état réel se termine par la nouvelle mention.
+
+**Déploiements futurs** : `/reports/` étant ignoré par Git, un simple `git pull` suffit sur le
+VPS. La manipulation des droits de la section 40 n'est plus nécessaire.
