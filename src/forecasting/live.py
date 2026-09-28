@@ -48,7 +48,8 @@ FORGET_AFTER_SECONDS = 3600.0
 BILAN_AFTER = pd.Timedelta(minutes=5)  # après minuit UTC, le temps que les dernières manches soient résolues
 FINISH_NAMES = {"R": "Regular", "F": "Fatality", "B": "Brutality", "Ba": "Babality", "Fr": "Friendship",
                 "An": "Animality", "Hk": "Hara-Kiri"}
-DISCLAIMER = "⚠️ Expérimental : aucun avantage de pari démontré (rapport du 25/09) — ne pas parier."
+DISCLAIMER = ("⚠️ Étude en cours : aucun modèle n'a encore prouvé qu'il battait les cotes du bookmaker "
+              "(réévalué chaque nuit) — ne pas parier.")
 
 LIVE_MATCHES_SQL = """
 SELECT game_id, league_id, p1_id, p2_id, p1_name, p2_name, start_ts, status

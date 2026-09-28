@@ -41,6 +41,7 @@ def test_render_message_shows_predictions_results_and_disclaimer():
     assert "M3 · Scorpion 55 %" in text and text.count("⏳") == 1
     assert "Bilan : vainqueur 2/2 ✅ · finish 1/2 ✅" in text and "🏁 Match terminé" in text
     assert text.endswith(live.DISCLAIMER)
+    assert "ne pas parier" in live.DISCLAIMER and "/" not in live.DISCLAIMER  # aucune date qui se périme
 
 
 def test_render_message_without_finish_market():
