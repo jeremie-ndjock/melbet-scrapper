@@ -2322,3 +2322,57 @@ rapport `reports/forecasting/20260927T2100Z_5f94fb7/`) :
 - finish MK3 : « signal prometteur, non démontré » (inchangé).
 
 Aucun avantage de pari n'est démontré : la mention « ne pas parier » reste justifiée.
+
+## 41. [CONTEXTE-EN-COURS] Suivi après mise en production : guide Grafana/Prometheus, mention des messages (2026-09-28)
+
+> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. **État au 28 septembre, ≈ 1 h 45 UTC**.
+
+**Guide d'utilisation de Grafana et Prometheus** (demandé par l'utilisateur), rédigé dans un
+document Claude Docs, et non dans le dépôt :
+https://claude.ai/code/artifact/cc28d0d6-792d-4866-81d3-f372723e0111
+
+Contenu :
+- vue d'ensemble ;
+- architecture et accès, avec un schéma (tunnel SSH `-L 3000:localhost:3000`, Prometheus
+  accessible par l'IP interne du conteneur) ;
+- lecture des 7 panneaux du tableau de bord « Collecteur de cotes » ;
+- catalogue des 13 métriques `collector_*` ;
+- PromQL et 13 requêtes du projet ;
+- création de tableaux de bord et versionnement via `collector.json` ;
+- alertes ;
+- maintenance et dépannage ;
+- aide-mémoire.
+
+Un commentaire laissé dans le document demande à l'utilisateur s'il faut ajouter les ligues AI
+Table Tennis à la surveillance (réponse en attente).
+
+**Constat trouvé en rédigeant ce guide** : le script de surveillance externe
+(`scripts/watchdog.py`, cron toutes les 5 min, seuil de 120 s) ne surveille par défaut que les
+deux ligues Mortal Kombat (`DEFAULT_LEAGUE_IDS = "1252965,2282406"`). Les deux ligues AI Table
+Tennis, collectées depuis le 23 septembre, n'y figurent pas, sauf si `WATCHDOG_LEAGUE_IDS` est
+réglé dans le `.env` du VPS (non vérifié).
+
+Correctif possible, en attente de la décision de l'utilisateur : ajouter
+`WATCHDOG_LEAGUE_IDS=1252965,2282406,3066896,3066897` au `.env` du VPS, ou changer la valeur par
+défaut dans le script.
+
+**Question de l'utilisateur, « le nouveau modèle n'est pas actif ? »**, sur une capture d'un
+match MK3 : si, il l'est. La prédiction de durée n'existe que pour MKX, faute de marché
+« Durée du Round » sur MK3. Vérifié sur le VPS à 01 h 31 UTC :
+- champions du 27/09 chargés depuis 00 h 46 UTC, 0 erreur sur 2 h ;
+- MKX : 62 manches sur 94 avec une prédiction de durée (les autres ont été prédites avant le
+  redémarrage, ou leur marché était déjà fermé) ;
+- MK3 : finish sur 110 manches sur 110.
+
+**En cours (demande de l'utilisateur)** : remplacer la mention figée « aucun avantage de pari
+démontré (rapport du 25/09) » à la fin de chaque message de prédiction par une phrase qui ne se
+périme pas. Nouvelle mention, dans `src/forecasting/live.py`, constante `DISCLAIMER` : « ⚠️ Étude
+en cours : aucun modèle n'a encore prouvé qu'il battait les cotes du bookmaker (réévalué chaque
+nuit) — ne pas parier. » Un test vérifie qu'elle ne contient plus de date.
+
+Reste à faire :
+- [ ] tests du service (en cours) ;
+- [ ] commit + push ;
+- [ ] sur le VPS : `git pull` (règle des droits sur `reports/forecasting`, section 40), puis
+  `docker compose --profile ml build ml` et `docker compose --profile ml up -d --no-build predictor` ;
+- [ ] vérifier la nouvelle mention dans un message.
