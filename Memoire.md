@@ -2207,9 +2207,9 @@ au cycle suivant au lieu d'envoyer un nouveau message, en distinguant l'erreur r
 - **Régénérer le jeton du bot** si un doute existe sur l'accès aux anciens journaux du VPS.
 - [ ] Deux passes complètes de tests, commit + push final, clôture de cette section.
 
-## 40. [CONTEXTE-EN-COURS] Réentraînement quotidien, prédiction de durée, règle prudente, bilan quotidien (2026-09-27/28)
+## 40. [CONTEXTE-EN-COURS] Réentraînement quotidien, prédiction de durée, règle prudente, bilan quotidien (2026-09-27/28) — TERMINÉ
 
-> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. Section mise à jour à chaque étape.
+> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. **État au 28 septembre, ≈ 1 h UTC : terminé**, rien en cours.
 
 Demande de l'utilisateur (27 septembre, après son retour) :
 1. réentraînement quotidien automatique des modèles, et ajout d'une prédiction de la **durée des
@@ -2271,6 +2271,54 @@ commit fait foi.
 - [x] Règle prudente enregistrée et poussée seule, avant tout jugement : commit `1a9d9b2` (2026-09-27 23:13 UTC).
 - [x] Tests : 56 tests nouveaux ou adaptés réussis. Deux défauts de TEST corrigés en route : un attendu faux dans le bilan, et une heure figée au chargement du fichier de test (le match simulé n'était plus « en direct » après une passe de plus de 10 min).
 - [ ] Deux passes complètes de la suite.
-- [ ] Déploiement : image `ml`, redémarrage de `predictor`, tâche cron à 4 h UTC, premier
-  réentraînement manuel pour créer les champions.
-- [ ] Vérification réelle (durée dans les messages, champions chargés), commit + push, clôture.
+- [x] 1re passe complète : 362 tests réussis. Commit `5f94fb7`.
+- [x] Déploiement (28 septembre, ≈ 0 h 30 UTC) :
+  - images `ml` et `scraper` reconstruites, collecteur redémarré (`healthy`) ;
+  - tâche cron installée : `0 4 * * * … docker compose --profile ml run --rm ml` ;
+  - premier réentraînement lancé à la main (8 min, évaluation comprise).
+- [x] Vérifié en production :
+  - **4 premiers champions promus** : vainqueur MKX (LightGBM), vainqueur MK3, finish MK3 et
+    **durée MKX** (régression logistique), chacun examiné sur ≈ 2 000 manches du dernier jour ;
+  - bilan envoyé dans le groupe ;
+  - `predictor` redémarré avec les champions, 0 erreur ;
+  - prédictions de durée publiées dès les premières manches suivantes. Exemple : ligne 30,5 s,
+    modèle 48,7 % « plus » contre 48,3 % pour le marché ;
+  - journal permanent alimenté (38 manches dès les premières minutes) ;
+  - premier bilan quotidien prévu le 29 septembre vers 0 h 05 UTC, pour la journée du 28.
+- [x] 2e passe complète : 362 tests réussis. Commit + push final.
+
+**Ce qu'il faudra regarder** :
+- le premier bilan quotidien (29 septembre, ≈ 0 h 05 UTC) ;
+- le premier réentraînement automatique (29 septembre, 4 h UTC), dans
+  `/var/log/oddscollector-ml.log` et dans le bilan Telegram (champions promus ou conservés) ;
+- à partir du 29 septembre, le cumul de la règle prudente dans chaque bilan quotidien. Un verdict
+  demande au moins 500 paris fictifs : plusieurs jours, voire semaines, selon la fréquence des
+  paris.
+
+**Incident de déploiement, résolu sans perte** : le `git pull` du VPS a échoué, et deux défauts
+se sont enchaînés.
+1. Le rapport officiel et le registre des essais, générés sur le VPS puis versionnés depuis la
+   machine locale, existaient déjà sur le VPS comme fichiers non suivis : Git refusait de les
+   écraser.
+2. Le dossier `reports/forecasting` appartient à l'utilisateur du conteneur (uid 10001), et non à
+   `ubuntu` : Git n'a pas pu y recréer ces fichiers, et le pull s'est arrêté au milieu.
+
+Correction :
+- sauvegarde du dossier ;
+- remise des fichiers dans leur état d'origine, SANS toucher au bit exécutable des scripts de
+  sauvegarde (dont dépend la sauvegarde nocturne de 3 h) ;
+- `chown` temporaire vers `ubuntu`, pull, puis retour à 10001 ;
+- vérification que les trois fichiers étaient identiques à la sauvegarde (c'était le cas).
+
+**À retenir pour les prochains déploiements** : `sudo chown -R ubuntu:ubuntu reports/forecasting`
+avant un `git pull` qui touche ce dossier, puis `sudo chown -R 10001:10001 reports/forecasting`
+après.
+
+**Évolution du verdict d'évaluation** (fenêtre de test agrandie à ≈ 5 jours, K = 4 essais,
+rapport `reports/forecasting/20260927T2100Z_5f94fb7/`) :
+- vainqueur MKX : « signal prometteur, non démontré » (auparavant « aucun avantage ») ;
+- durée MKX : « aucun avantage détecté » ;
+- vainqueur MK3 : « aucun avantage détecté » (inchangé) ;
+- finish MK3 : « signal prometteur, non démontré » (inchangé).
+
+Aucun avantage de pari n'est démontré : la mention « ne pas parier » reste justifiée.
