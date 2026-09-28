@@ -93,6 +93,16 @@ class PlattCalibrator:
         return self.lr.predict_proba(z)[:, 1]
 
 
+class IdentityCalibrator:
+    """Aucune recalibration : pour un modèle qui inclut déjà la cote du marché (durée MKX)."""
+
+    def fit(self, *_) -> IdentityCalibrator:
+        return self
+
+    def transform(self, p) -> np.ndarray:
+        return np.asarray(p, float)
+
+
 class TemperatureCalibrator:
     """Recalibration multiclasse : softmax(log p / T), un seul paramètre."""
 

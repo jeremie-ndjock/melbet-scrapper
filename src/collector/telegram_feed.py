@@ -92,6 +92,8 @@ class MatchFeedSender:
                 response = await client.post(url, data={
                     "chat_id": chat_id, "message_id": message_id, "text": text,
                 })
+                if response.status_code == 400 and "message is not modified" in response.text:
+                    return True  # texte déjà à jour (ex. édition précédente arrivée malgré une coupure)
                 response.raise_for_status()
                 return True
         except httpx.HTTPError as exc:

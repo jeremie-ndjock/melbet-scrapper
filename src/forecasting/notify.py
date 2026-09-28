@@ -35,6 +35,11 @@ def format_summary(run: dict) -> str:
         lines.append(f"{ICONS.get(res['cible'], '•')} {title} : {res['verdict']}")
         if res.get("backtest"):
             lines.append(f"    backtest à mise fixe : {_roi(res['backtest'])}")
+    if run.get("production"):
+        lines += ["", "🔁 Réentraînement quotidien :"]
+        for d in run["production"]:
+            lines.append(f"    {d['cible']} : {'nouveau modèle en service' if d['promu'] else 'modèle en place conservé'}"
+                         f" ({d['raison']})")
     lines.append("")
     if any(res["verdict"] == AVANTAGE for res in run["resultats"]):
         lines.append("✅ Au moins un modèle montre un avantage démontré (détail dans le rapport).")

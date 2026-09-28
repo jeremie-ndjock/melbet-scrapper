@@ -148,8 +148,11 @@ def test_format_message_tolerates_an_unknown_winner_name(caplog):
     assert any("ne correspond à aucun des deux adversaires" in r.message for r in caplog.records)
 
 
-def _fake_async_client(monkeypatch, captured, *, post_result=None, raise_exc=None):
+def _fake_async_client(monkeypatch, captured, *, post_result=None, raise_exc=None, status_code=200, text=""):
     class FakeResponse:
+        def __init__(self):
+            self.status_code, self.text = status_code, text
+
         def raise_for_status(self):
             if raise_exc:
                 raise raise_exc
@@ -207,6 +210,16 @@ async def test_edit_returns_false_on_http_error_without_raising(monkeypatch):
     _fake_async_client(monkeypatch, captured, raise_exc=httpx.HTTPStatusError("erreur", request=None, response=None))
     sender = MatchFeedSender(BOT_TOKEN)
     assert await sender.edit("-999", 1, "x") is False
+
+
+async def test_edit_treats_message_not_modified_as_success(monkeypatch):
+    """Une édition arrivée malgré une coupure réseau, puis retentée : Telegram répond 400
+    « message is not modified ». Ce n'est pas un échec (sinon un doublon serait envoyé)."""
+    captured = {}
+    _fake_async_client(monkeypatch, captured, status_code=400,
+                       text='{"ok":false,"description":"Bad Request: message is not modified"}',
+                       raise_exc=httpx.HTTPStatusError("400", request=None, response=None))
+    assert await MatchFeedSender(BOT_TOKEN).edit("-999", 1, "x") is True
 
 
 async def test_send_or_edit_edits_when_a_message_id_is_known(monkeypatch):

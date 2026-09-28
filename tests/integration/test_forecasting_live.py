@@ -12,7 +12,6 @@ from forecasting import extract, live
 from forecasting.features import FIGHTER_CATS, WINNER_NUM
 
 MKX = 1252965
-NOW = datetime.now(timezone.utc).replace(microsecond=0)
 LIVE_GAME = 999
 
 
@@ -34,15 +33,16 @@ class FakeSender:
     def __init__(self):
         self.sent, self.edited = [], []
 
-    async def send_or_edit(self, chat_id, message_id, text):
-        if message_id is None:
-            self.sent.append(text)
-            return 100 + len(self.sent)
+    async def send(self, chat_id, text):
+        self.sent.append(text)
+        return 100 + len(self.sent)
+
+    async def edit(self, chat_id, message_id, text):
         self.edited.append(text)
-        return message_id
+        return True
 
 
-async def _seed(dsn: str) -> None:
+async def _seed(dsn: str, NOW: datetime) -> None:
     conn = await asyncpg.connect(dsn)
     try:
         # Historique : trois matchs terminés entre les deux mêmes combattants.
@@ -69,7 +69,10 @@ async def _seed(dsn: str) -> None:
 
 
 async def test_live_match_is_predicted_then_scored_round_by_round(db_dsn, tmp_path):
-    await _seed(db_dsn)
+    # Heure prise au moment du test (pas au chargement du fichier) : le match simulé doit être « vu
+    # à l'instant », même si la suite de tests est longue.
+    NOW = datetime.now(timezone.utc).replace(microsecond=0)
+    await _seed(db_dsn, NOW)
     run_dir = tmp_path / "20260925T1500Z_test"
     run_dir.mkdir()
     joblib.dump({"nom": "test", "modele": ConstModel([0.35, 0.65]), "calibrateur": Identity(),

@@ -116,6 +116,16 @@ def render_markdown(run: dict) -> str:
         if res.get("notes"):
             lines += [""] + [f"- {n}" for n in res["notes"]]
         lines.append("")
+    if run.get("production"):
+        lines += ["## Modèles de production (réentraînement quotidien)", "",
+                  "Chaque modèle est réentraîné sur les données récentes, puis comparé au modèle en place sur le "
+                  "dernier jour, qu'aucun des deux n'a vu. Il n'est promu que s'il fait au moins aussi bien.", "",
+                  "| Cible | Décision | Modèle | Entraînement | Jour d'examen | Log-loss nouveau | Log-loss en place | Raison |",
+                  "|---|---|---|---|---|---|---|---|"]
+        for d in run["production"]:
+            lines.append(f"| {d['cible']} | {'promu' if d['promu'] else 'non promu'} | {d['modele']} | {d['n_entrainement']} | "
+                         f"{d['n_examen']} | {_f(d['log_loss_challenger'])} | {_f(d['log_loss_champion'])} | {d['raison']} |")
+        lines.append("")
     q = run.get("qualite", {})
     if q:
         lines += ["## Qualité des données", "", "```", json.dumps(_round(q), ensure_ascii=False, indent=2, sort_keys=True), "```", ""]

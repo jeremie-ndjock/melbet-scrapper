@@ -168,9 +168,16 @@ Ajouter :
 */5 * * * * cd /opt/oddscollector && docker compose --profile test run --rm tests python scripts/watchdog.py >> /var/log/oddscollector-watchdog.log 2>&1
 ```
 
-**Évaluation des modèles prédictifs** (conteneur `ml`, Memoire.md section 38) : pas encore
-planifiée. Préparation unique du dossier des rapports, écrit par l'utilisateur non root du
-conteneur (uid 10001) :
+**Évaluation et réentraînement quotidien des modèles prédictifs** (conteneur `ml`, Memoire.md
+sections 38 et 40), tous les jours à 4 h UTC, après la sauvegarde de 3 h :
+
+```cron
+0 4 * * * cd /opt/oddscollector && docker compose --profile ml run --rm ml >> /var/log/oddscollector-ml.log 2>&1
+```
+
+(Créer le fichier de journal une fois : `sudo touch /var/log/oddscollector-ml.log && sudo chown ubuntu:ubuntu /var/log/oddscollector-ml.log`.)
+Préparation unique du dossier des rapports, écrit par l'utilisateur non root du conteneur
+(uid 10001) :
 
 ```bash
 mkdir -p /opt/oddscollector/reports/forecasting && sudo chown 10001:10001 /opt/oddscollector/reports/forecasting

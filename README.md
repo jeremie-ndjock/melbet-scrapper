@@ -88,8 +88,17 @@ docker compose --profile ml run --rm ml                                       # 
 
 Le rapport est écrit dans `reports/forecasting/<date>_<version>/` (versionné, avec le registre
 des essais `trials.jsonl`) et un bilan est envoyé sur le salon Telegram
-`TELEGRAM_PREDICTION_CHAT_ID`. Aucune prédiction manche par manche n'est publiée tant qu'aucun
-modèle n'a démontré un avantage de pari.
+`TELEGRAM_PREDICTION_CHAT_ID`. La même commande réentraîne les modèles de production et ne les
+promeut que s'ils font au moins aussi bien que ceux en place (Memoire.md, section 40). Tâche
+planifiée quotidienne sur le VPS :
+
+```cron
+0 4 * * * cd /opt/oddscollector && docker compose --profile ml run --rm ml >> /var/log/oddscollector-ml.log 2>&1
+```
+
+Prédictions en direct (vainqueur, finish MK3, durée MKX, puis résultat de chaque manche) et bilan
+quotidien de leur taux de réussite : `docker compose --profile ml up -d predictor`. Chaque
+message rappelle qu'aucun avantage de pari n'est démontré.
 
 ## Sauvegardes
 

@@ -19,7 +19,7 @@ import pandas as pd
 from collector.observability.logging_setup import configure_logging
 from collector.telegram_feed import MatchFeedSender
 
-from . import extract, live, notify, quality
+from . import extract, live, notify, production, quality
 from .pipelines import Config, run_all
 from .report import write_report
 from .targets import G_DURATION, G_FINISH, G_WINNER, MK3, MKX
@@ -88,6 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.choices["run"].add_argument("--artifacts", default=os.environ.get("FORECAST_ARTIFACTS", "/app/artifacts"))
     sub.choices["run"].add_argument("--no-lgbm", action="store_true", help="régression logistique seule (plus rapide)")
     sub.choices["run"].add_argument("--no-telegram", action="store_true", help="ne pas envoyer le bilan sur Telegram")
+    sub.choices["run"].add_argument("--no-production", action="store_true",
+                                    help="ne pas réentraîner ni promouvoir les modèles de production")
     live_p = sub.add_parser("live", help="prédictions en direct sur le salon Telegram de prédiction")
     live_p.add_argument("--artifacts", default=os.environ.get("FORECAST_ARTIFACTS", "/app/artifacts"))
     args = parser.parse_args(argv)
@@ -121,7 +123,14 @@ def main(argv: list[str] | None = None) -> int:
     store: dict = {}
     results = run_all(data, as_of=as_of, cfg=cfg, registry=registry, meta=meta, targets=targets, store=store)
     run_id = f"{as_of.strftime('%Y%m%dT%H%MZ')}_{commit}"
-    run = {**meta, "lag_minutes": lag.total_seconds() / 60, "qualite": report, "resultats": results}
+    decisions: list[dict] = []
+    if not args.no_production:
+        log.info("réentraînement des modèles de production (examen de passage champion/challenger)")
+        decisions = production.promote(Path(args.artifacts), run_id, production.train_production(data, as_of, cfg))
+        for dec in decisions:
+            log.info("%s : %s (%s)", dec["cible"], "promu" if dec["promu"] else "non promu", dec["raison"])
+    run = {**meta, "lag_minutes": lag.total_seconds() / 60, "qualite": report, "resultats": results,
+           "production": decisions}
     out = write_report(reports_dir / run_id, run)
     _save_artifacts(Path(args.artifacts), run_id, store, meta)
     for res in results:

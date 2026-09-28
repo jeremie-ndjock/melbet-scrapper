@@ -233,19 +233,34 @@ def evaluate_history_target(*, title: str, target: str, league_id: int, feat: pd
 
 # --------------------------------------------------------------------------- cible A
 
+def duration_frame(feat: pd.DataFrame, lines: pd.DataFrame, as_of: pd.Timestamp, lag: pd.Timedelta):
+    """Manches MKX de durée connue, jointes à la ligne principale du marché : (lignes, cotes
+    [moins, plus], probabilités du marché marge retirée, marge, étiquette « plus »)."""
+    df = feat[feat["seconds"].notna() & (feat["date_start"] + lag <= as_of)].merge(
+        lines[["game_id", "round_no", "line", f"close_{T_UNDER}", f"close_{T_OVER}"]], on=["game_id", "round_no"])
+    df = df.sort_values(["date_start", "game_id", "round_no"]).reset_index(drop=True)
+    odds = df[[f"close_{T_UNDER}", f"close_{T_OVER}"]].to_numpy(float).reshape(-1, 2)
+    P_fair, margin = devig(odds) if len(df) else (np.empty((0, 2)), np.empty(0))
+    df["logit_p_market"] = logit(np.clip(P_fair[:, 1], 1e-6, 1 - 1e-6)) if len(df) else []
+    y = (df["seconds"] > df["line"]).astype(int).to_numpy()
+    return df, odds, P_fair, margin, y
+
+
+def duration_lines(odds: pd.DataFrame, round_ends: pd.DataFrame) -> pd.DataFrame:
+    """Ligne principale de chaque manche MKX à la clôture, sans cote postérieure à la manche."""
+    q = closing_quotes(odds, REQUIRED_T)
+    q = q[q["g"] == G_DURATION] if "g" in q else q
+    lines = _market_frame(main_line(q, T_OVER, T_UNDER), ["line", f"close_{T_UNDER}", f"close_{T_OVER}"])
+    return _leakage_guard(lines, round_ends)
+
+
 def evaluate_duration(*, feat: pd.DataFrame, lines: pd.DataFrame, as_of: pd.Timestamp, cfg: Config,
                       registry, meta: dict, n_blocks: int = 6) -> dict:
     res = {"titre": "Durée de manche — Mortal Kombat X (P(durée > ligne principale))", "cible": "duree",
            "ligue": MKX, "preliminaire": True, "notes": []}
-    df = feat[feat["seconds"].notna() & (feat["date_start"] + cfg.lag <= as_of)].merge(
-        lines[["game_id", "round_no", "line", f"close_{T_UNDER}", f"close_{T_OVER}"]], on=["game_id", "round_no"])
-    df = df.sort_values(["date_start", "game_id", "round_no"]).reset_index(drop=True)
+    df, odds, P_fair, margin, y = duration_frame(feat, lines, as_of, cfg.lag)
     if len(df) < 6 * cfg.min_test_rows // 2:
         return {**res, "verdict": NON_EVALUABLE, "erreur": f"trop peu de manches avec durée et cote ({len(df)})"}
-    odds = df[[f"close_{T_UNDER}", f"close_{T_OVER}"]].to_numpy(float)
-    P_fair, margin = devig(odds)
-    df["logit_p_market"] = logit(np.clip(P_fair[:, 1], 1e-6, 1 - 1e-6))
-    y = (df["seconds"] > df["line"]).astype(int).to_numpy()
     blocks, starts = match_blocks(df["game_id"], df["date_start"], n_blocks)
     blocks = blocks.to_numpy()
     cats = ["prev_finish"]
@@ -338,9 +353,7 @@ def run_all(data: dict, *, as_of: pd.Timestamp, cfg: Config, registry, meta: dic
                 store=store))
 
         if "duration" in targets and league == MKX:
-            q = quotes[quotes["g"] == G_DURATION]
-            lines = _market_frame(main_line(q, T_OVER, T_UNDER), ["line", f"close_{T_UNDER}", f"close_{T_OVER}"])
-            lines, leaked = _leakage_guard(lines, d["round_ends"])
+            lines, leaked = duration_lines(d["odds"], d["round_ends"])
             res = evaluate_duration(feat=feat, lines=lines, as_of=as_of, cfg=cfg, registry=registry, meta=meta)
             res["notes"].append(f"Cotes écartées car postérieures à la manche : {leaked}")
             results.append(res)

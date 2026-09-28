@@ -2268,7 +2268,9 @@ commit fait foi.
 ### Avancement
 - [x] Code : `rules.py`, `journal.py`, `production.py`, `live.py` (durée, journal, bilan, reprises),
   commande `run --no-production`, rapport et bilan Telegram enrichis.
-- [ ] Tests (nouveaux et existants adaptés), deux passes complètes.
+- [x] Règle prudente enregistrée et poussée seule, avant tout jugement : commit `1a9d9b2` (2026-09-27 23:13 UTC).
+- [x] Tests : 56 tests nouveaux ou adaptés réussis. Deux défauts de TEST corrigés en route : un attendu faux dans le bilan, et une heure figée au chargement du fichier de test (le match simulé n'était plus « en direct » après une passe de plus de 10 min).
+- [ ] Deux passes complètes de la suite.
 - [ ] Déploiement : image `ml`, redémarrage de `predictor`, tâche cron à 4 h UTC, premier
   réentraînement manuel pour créer les champions.
 - [ ] Vérification réelle (durée dans les messages, champions chargés), commit + push, clôture.
