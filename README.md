@@ -86,8 +86,9 @@ docker compose --profile ml run --rm ml python -m forecasting check-data     # q
 docker compose --profile ml run --rm ml                                       # évaluation complète
 ```
 
-Le rapport est écrit dans `reports/forecasting/<date>_<version>/` (versionné, avec le registre
-des essais `trials.jsonl`) et un bilan est envoyé sur le salon Telegram
+Le rapport est écrit sur le VPS dans `reports/forecasting/<date>_<version>/`, avec le registre
+des essais `trials.jsonl` (dossier de travail non versionné ; copies des rapports officiels dans
+`docs/forecasting/rapports/`) et un bilan est envoyé sur le salon Telegram
 `TELEGRAM_PREDICTION_CHAT_ID`. La même commande réentraîne les modèles de production et ne les
 promeut que s'ils font au moins aussi bien que ceux en place (Memoire.md, section 40). Tâche
 planifiée quotidienne sur le VPS :
@@ -130,7 +131,7 @@ migrations/              schéma SQL, appliqué automatiquement au démarrage
 scripts/                 outils d'exploitation (watchdog, sauvegarde, restauration)
 monitoring/              configuration Prometheus et provisioning Grafana
 tests/                   tests unitaires et d'intégration, données réelles de référence
-reports/forecasting/     rapports d'évaluation des modèles et registre des essais
+docs/forecasting/rapports/  copies des rapports d'évaluation officiels
 docs/architecture.md     architecture validée et décisions
 Memoire.md               journal complet du projet (reconnaissance + implémentation)
 ```

@@ -322,7 +322,7 @@ const doc = new Document({
       ]),
       Note("Calendrier réaliste d'un modèle fiable, s'il existe un signal exploitable : premier verdict vers le 25 septembre 2026 (J+3), modèle complet vers fin octobre - mi-novembre, plus 1 à 3 semaines de validation hors entraînement avant de s'y fier. Il est possible que l'étude conclue à l'absence d'avantage exploitable : ce serait un résultat à part entière."),
 
-      H2("10.1 Premier verdict (25 septembre 2026, rapport reports/forecasting/)"),
+      H2("10.1 Premier verdict (25 septembre 2026, rapports dans docs/forecasting/rapports/)"),
       table([2600, 2300, 4700], [
         ["Cible", "Verdict", "Détail"],
         ["Vainqueur de manche MKX et MK3", "Aucun avantage détecté", "Le modèle seul fait moins bien que le marché ; son poids dans la combinaison est nul. Le marché intègre déjà la force des combattants."],

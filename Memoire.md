@@ -2371,8 +2371,15 @@ en cours : aucun modèle n'a encore prouvé qu'il battait les cotes du bookmaker
 nuit) — ne pas parier. » Un test vérifie qu'elle ne contient plus de date.
 
 Reste à faire :
-- [ ] tests du service (en cours) ;
-- [ ] commit + push ;
-- [ ] sur le VPS : `git pull` (règle des droits sur `reports/forecasting`, section 40), puis
-  `docker compose --profile ml build ml` et `docker compose --profile ml up -d --no-build predictor` ;
+- [x] tests du service : 11 réussis ; commit `c5c8e31`, poussé ;
+- [x] **Cause du blocage récurrent du `git pull` sur le VPS corrigée.** Le conteneur `ml` écrit
+  chaque jour un rapport et complète `trials.jsonl` dans `reports/forecasting/` sur le VPS ; les
+  mêmes fichiers, versionnés depuis la machine locale, bloquaient chaque `git pull`. Désormais :
+  - `/reports/` est ignoré par Git : c'est le dossier de travail du VPS, qui reste la source de
+    vérité du registre des essais ;
+  - les copies des rapports officiels sont versionnées dans `docs/forecasting/rapports/` (les
+    deux rapports déjà faits y ont été déplacés avec `git mv`) ;
+  - pour la transition, le dossier du VPS est mis de côté pendant le pull puis remis en place ;
+- [ ] sur le VPS : pull de transition, puis `docker compose --profile ml build ml` et
+  `docker compose --profile ml up -d --no-build predictor` ;
 - [ ] vérifier la nouvelle mention dans un message.

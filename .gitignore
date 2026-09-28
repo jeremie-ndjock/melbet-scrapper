@@ -27,3 +27,7 @@ package-lock.json
 # Modèles entraînés (volume Docker `ml_artifacts`), jamais versionnés ; les rapports, eux, le sont
 artifacts/
 *.joblib
+
+# Rapports et registre des essais écrits par le conteneur `ml` sur le VPS (dossier de travail,
+# source de vérité du registre). Copies des rapports officiels : docs/forecasting/rapports/.
+/reports/
