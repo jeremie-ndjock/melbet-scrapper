@@ -2463,9 +2463,10 @@ Reste à faire :
 **Déploiements futurs** : `/reports/` étant ignoré par Git, un simple `git pull` suffit sur le
 VPS. La manipulation des droits de la section 40 n'est plus nécessaire.
 
-## 42. [CONTEXTE-EN-COURS] Contrôle du 29-30/09, dimensionnement du VPS, AI Table Tennis, ligne « modèle », bilan (2026-09-30)
+## 42. [CONTEXTE-EN-COURS] Contrôle du 29-30/09, dimensionnement du VPS, AI Table Tennis, ligne « modèle », bilan (2026-09-30) — TERMINÉ
 
-> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. Demandes de l'utilisateur (30/09, ≈ 0 h UTC),
+> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. **État au 30/09, ≈ 2 h 05 UTC : terminé, rien
+> en cours**, commit `9be2942` déployé et vérifié. Demandes de l'utilisateur (30/09, ≈ 0 h UTC),
 > dans l'ordre : 1. caractéristiques minimales du VPS ; 2. Memoire.md prêt pour une reprise dans
 > un mois ; 3. peut-on prédire sur AI Table Tennis ? ; 4. ligues AI Table Tennis dans la
 > surveillance ; 5. ligne « modèle du JJ/MM » dans les messages ; 6. corriger l'affichage du bilan.
@@ -2616,9 +2617,19 @@ Croissance :
 - [x] deux exécutions complètes de la suite de tests : 366 réussis chaque fois (22 min 41 s et
   22 min 04 s) ;
 - [x] contrôle des secrets : 0 occurrence dans les 9 fichiers modifiés ; commit et push ;
-- [ ] sur le VPS : `git pull`, `docker compose --profile ml build ml`,
-  `docker compose --profile ml up -d --no-build predictor` ; la surveillance lit le script
-  directement depuis le dépôt (volume `.:/app` du service `tests`), sans reconstruction ;
-- [ ] vérifications réelles : surveillance lancée à la main (code de sortie 0 avec les 4 ligues),
-  bilan du 29/09 rendu avec le nouveau format, ligne « 🧠 Modèle du … » visible dans un message
-  en direct, 0 erreur.
+- [x] déployé sur le VPS le 30/09 à 1 h 59 UTC (`9be2942`). Le `git pull` est passé sans
+  manipulation (dossier `reports/forecasting` intact) ; image `ml` reconstruite, `predictor`
+  redémarré. La surveillance lit le script directement depuis le dépôt (volume `.:/app` du service
+  `tests`), sans reconstruction. Les seules différences locales restantes sur le VPS sont les
+  droits d'exécution de `scripts/backup_db.sh` et `restore_db.sh`, à garder ;
+- [x] vérifié en conditions réelles :
+  - surveillance lancée à la main : ligues `[1252965, 2282406, 3066896, 3066897]`, code de
+    sortie 0 ;
+  - bilan du 29/09 rendu au nouveau format (« 2 094 manches », « 56,7 % », « log-loss 0,668 »,
+    « finish R/F/B, avantage ≥ 3 pts, mise fictive 1 000 F ») ;
+  - message MKX réel (ALIEN VS Reptile, 01 h 50 UTC) terminé par « 🧠 Modèle du 29/09 » puis la
+    mention « ne pas parier » ;
+  - 0 erreur depuis le redémarrage.
+
+  Le bilan du 29/09 avait déjà été publié à 00 h 05 UTC dans l'ancien format ; celui du 30/09
+  (publié le 01/10 à 00 h 05 UTC) sera le premier au nouveau format.
