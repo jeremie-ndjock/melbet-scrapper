@@ -110,7 +110,7 @@ def load_champions(artifacts_dir: Path) -> tuple[str, dict]:
     for key, info in champions.items():
         path = Path(artifacts_dir) / PRODUCTION_DIR / info["run"] / f"{key}.joblib"
         if path.exists():
-            models[key] = joblib.load(path)
+            models[key] = {**joblib.load(path), "version": info["run"]}
     return json.dumps({k: v["run"] for k, v in sorted(champions.items())}), models
 
 

@@ -99,13 +99,18 @@ def rule_bets(records: list[dict]) -> list[dict]:
     return bets
 
 
+def _num(x: float, decimals: int = 0, signed: bool = False) -> str:
+    """Nombre à la française : virgule décimale, espace insécable entre les milliers."""
+    return f"{x:{'+' if signed else ''},.{decimals}f}".replace(",", "\u00a0").replace(".", ",")
+
+
 def _line(label: str, b: dict, unit: str = "manches") -> str:
     if not b["n"]:
         return f"{label} : aucune {unit[:-1]} résolue"
     better = "✅" if b["ll_modele"] < b["ll_marche"] else "➖"
-    return (f"{label} ({b['n']} {unit}) : modèle {b['modele'] * 100:.1f} % juste, favori du marché "
-            f"{b['marche'] * 100:.1f} % — qualité des probabilités {better} "
-            f"(log-loss {b['ll_modele']:.3f} contre {b['ll_marche']:.3f})")
+    return (f"{label} ({_num(b['n'])} {unit}) : modèle {_num(b['modele'] * 100, 1)} % juste, favori du marché "
+            f"{_num(b['marche'] * 100, 1)} % — qualité des probabilités {better} "
+            f"(log-loss {_num(b['ll_modele'], 3)} contre {_num(b['ll_marche'], 3)})")
 
 
 def format_daily(day: str, summary: dict, day_bets: list[dict], cumulative: dict) -> str:
@@ -116,13 +121,14 @@ def format_daily(day: str, summary: dict, day_bets: list[dict], cumulative: dict
     lines.append(_line(f"⏱️ Durée {LEAGUE_NAMES[MKX]}", summary[f"duree_{MKX}"]))
     lines.append("")
     profit = sum(b["profit"] for b in day_bets)
-    lines.append(f"🧪 Règle prudente (finish R/F/B, avantage ≥ {rules.MIN_EDGE * 100:.0f} pts, mise fictive "
-                 f"{rules.STAKE:,.0f} F) : {len(day_bets)} paris ce jour, {profit:+,.0f} F".replace(",", " "))
+    lines.append(f"🧪 Règle prudente (finish R/F/B, avantage ≥ {_num(rules.MIN_EDGE * 100)} pts, mise fictive "
+                 f"{_num(rules.STAKE)} F) : {len(day_bets)} paris ce jour, {_num(profit, signed=True)} F")
     if cumulative["n_paris"]:
         lines.append(f"   Cumul depuis le {rules.JUDGED_FROM.strftime('%d/%m/%Y')} : {cumulative['n_paris']} paris, "
-                     f"{cumulative['resultat']:+,.0f} F, rendement {cumulative['rendement'] * 100:+.1f} % "
-                     f"[{cumulative['ic_bas'] * 100:+.1f} % ; {cumulative['ic_haut'] * 100:+.1f} %] — "
-                     f"{cumulative['verdict']}".replace(",", " "))
+                     f"{_num(cumulative['resultat'], signed=True)} F, "
+                     f"rendement {_num(cumulative['rendement'] * 100, 1, True)} % "
+                     f"[{_num(cumulative['ic_bas'] * 100, 1, True)} % ; {_num(cumulative['ic_haut'] * 100, 1, True)} %] — "
+                     f"{cumulative['verdict']}")
     else:
         lines.append(f"   Jugée à partir du {rules.JUDGED_FROM.strftime('%d/%m/%Y')} : {cumulative['verdict']}.")
     lines += ["", "⚠️ Paris fictifs, à titre d'étude : aucun avantage de pari démontré à ce jour — ne pas parier."]

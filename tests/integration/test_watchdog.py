@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from watchdog import check_league, run_check
+from collector.config import load_leagues
+from watchdog import DEFAULT_LEAGUE_IDS, check_league, run_check
 
 MK_X, MK_3 = 1252965, 2282406
 
@@ -67,3 +68,8 @@ async def test_run_check_reports_every_stale_league_in_one_alert(db):
     assert len(alerter.calls) == 1
     message = alerter.calls[0][2]
     assert "1252965" in message and "2282406" in message
+
+
+def test_default_leagues_cover_every_collected_league():
+    """Toute ligue collectée (config/leagues.yaml) est surveillée par défaut, sans réglage du .env."""
+    assert {int(x) for x in DEFAULT_LEAGUE_IDS.split(",")} == {lg.id for lg in load_leagues()}

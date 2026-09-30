@@ -13,8 +13,10 @@ seulement le sondage d'une ligue.
 
 Variables d'environnement :
 - ``DATABASE_URL`` (obligatoire)
-- ``WATCHDOG_LEAGUE_IDS`` : identifiants de ligue séparés par des virgules (défaut : les deux
-  ligues validées, Memoire.md section 1)
+- ``WATCHDOG_LEAGUE_IDS`` : identifiants de ligue séparés par des virgules (défaut : les quatre
+  ligues collectées en production, MKX et MK3 puis AI Table Tennis Prague et Goa ; intervalle
+  maximal mesuré entre deux cycles réussis sur 7 jours : 75 s pour les ligues AI Table Tennis,
+  Memoire.md section 42)
 - ``WATCHDOG_MAX_AGE_SECONDS`` : ancienneté maximale tolérée du dernier cycle réussi (défaut 120 s,
   soit environ 24 cycles de 5 s : largement au-dessus du bruit normal, sans être trop permissif)
 """
@@ -32,7 +34,7 @@ import asyncpg  # noqa: E402
 
 from collector.alerting import AlertSender, ThrottledAlerter, load_alert_config_from_env  # noqa: E402
 
-DEFAULT_LEAGUE_IDS = "1252965,2282406"
+DEFAULT_LEAGUE_IDS = "1252965,2282406,3066896,3066897"
 MAX_AGE_SECONDS = int(os.environ.get("WATCHDOG_MAX_AGE_SECONDS", "120"))
 LEAGUE_IDS = [int(x) for x in os.environ.get("WATCHDOG_LEAGUE_IDS", DEFAULT_LEAGUE_IDS).split(",")]
 

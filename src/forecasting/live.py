@@ -48,6 +48,7 @@ FORGET_AFTER_SECONDS = 3600.0
 BILAN_AFTER = pd.Timedelta(minutes=5)  # après minuit UTC, le temps que les dernières manches soient résolues
 FINISH_NAMES = {"R": "Regular", "F": "Fatality", "B": "Brutality", "Ba": "Babality", "Fr": "Friendship",
                 "An": "Animality", "Hk": "Hara-Kiri"}
+MODEL_TARGETS = {"vainqueur": "vainqueur", "finish": "finish", "duree": "durée"}
 DISCLAIMER = ("⚠️ Étude en cours : aucun modèle n'a encore prouvé qu'il battait les cotes du bookmaker "
               "(réévalué chaque nuit) — ne pas parier.")
 
@@ -80,7 +81,7 @@ def latest_models(artifacts_dir: Path) -> tuple[str | None, dict]:
     if not runs:
         return None, {}
     run = runs[-1]
-    return run.name, {f.stem: joblib.load(f) for f in run.glob("*.joblib")}
+    return run.name, {f.stem: {**joblib.load(f), "version": run.name} for f in run.glob("*.joblib")}
 
 
 def load_models(artifacts_dir: Path) -> tuple[str | None, dict]:
@@ -92,6 +93,25 @@ def load_models(artifacts_dir: Path) -> tuple[str | None, dict]:
     if not models:
         return None, {}
     return f"évaluation {eval_name} ; champions {champ_sig}", models
+
+
+def model_day(version) -> str | None:
+    """Jour (ISO) des données d'entraînement d'une version ``20260929T0100Z_51c5b0c``."""
+    try:
+        return pd.to_datetime(str(version)[:8], format="%Y%m%d").date().isoformat()
+    except ValueError:
+        return None
+
+
+def model_versions(models: dict, league: int) -> dict:
+    """Jour de chaque modèle de la ligue, par cible : noté sur chaque manche au moment de la
+    prédiction, pour afficher dans le message quelle version a prédit."""
+    out = {}
+    for target in MODEL_TARGETS:
+        day = model_day((models.get(f"{target}_{league}") or {}).get("version"))
+        if day:
+            out[target] = day
+    return out
 
 
 def _finish_of(code, di) -> str | None:
@@ -189,6 +209,27 @@ def _line_s(line: float) -> str:
     return f"{line:.1f}".replace(".", ",")
 
 
+def _versions_line(rounds: list[dict]) -> str | None:
+    """« 🧠 Modèle du 29/09 », détaillé par cible si les dates diffèrent ; ne cite que les
+    modèles réellement utilisés (finish, durée) pour les manches du message."""
+    seen = []
+    for r in rounds:
+        used = {t: d for t, d in (r.get("versions") or {}).items()
+                if t == "vainqueur" or (t == "finish" and r.get("finish")) or (t == "duree" and r.get("dur_line") is not None)}
+        if used:
+            seen.append(used)
+    if not seen:
+        return None
+    days = sorted({d for v in seen for d in v.values()})
+    ddmm = [pd.Timestamp(d).strftime("%d/%m") for d in days]
+    if len(days) == 1:
+        return f"🧠 Modèle du {ddmm[0]}"
+    if all(v == seen[0] for v in seen):
+        return "🧠 Modèles : " + " · ".join(f"{MODEL_TARGETS[t]} du {pd.Timestamp(d).strftime('%d/%m')}"
+                                            for t, d in seen[0].items())
+    return f"🧠 Modèles du {', '.join(ddmm[:-1])} et du {ddmm[-1]} (mis à jour pendant le match)"
+
+
 def render_message(match: dict) -> str:
     """Texte complet du message d'un match, reconstruit à chaque fois (idempotent)."""
     p1, p2 = match["names"]
@@ -243,7 +284,8 @@ def render_message(match: dict) -> str:
         lines += ["", "Bilan : " + " · ".join(parts)]
     if match.get("done"):
         lines.append("🏁 Match terminé")
-    lines += ["", DISCLAIMER]
+    versions = _versions_line([match["rounds"][k] for k in sorted(match["rounds"], key=int)])
+    lines += ["", DISCLAIMER] if versions is None else ["", versions, DISCLAIMER]
     return "\n".join(lines)
 
 
@@ -398,6 +440,7 @@ class LivePredictor:
             x = round_frame(self._match_features(league, meta), meta, rounds, next_round)
             pred = predict_round(self.models, league, x)
             if "p1" in pred:
+                pred["versions"] = model_versions(self.models, league)
                 m["rounds"][str(next_round)] = pred
                 self._fill_market(m, gid, next_round, pred, quotes, lambda: x)
                 m["dirty"] = True

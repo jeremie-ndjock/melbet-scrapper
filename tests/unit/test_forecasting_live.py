@@ -94,6 +94,7 @@ def test_latest_models_picks_the_most_recent_run(tmp_path):
     (tmp_path / "20260926T1500Z_vide").mkdir()
     name, models = live.latest_models(tmp_path)
     assert name == "20260925T1500Z_b" and models[f"vainqueur_{MKX}"]["nom"] == name
+    assert models[f"vainqueur_{MKX}"]["version"] == name
     assert live.latest_models(tmp_path / "absent") == (None, {})
 
 
@@ -166,3 +167,32 @@ async def test_daily_bilan_is_published_once_after_midnight(tmp_path):
     assert sender.sent[0].startswith("📈 BILAN DES PRÉDICTIONS — 30/09/2026")
     assert await pred._daily_bilan(now=next_day + pd.Timedelta(minutes=20)) is False  # une seule fois
     assert len(sender.sent) == 1
+
+
+def test_model_versions_from_run_names():
+    assert live.model_day("20260929T0100Z_51c5b0c") == "2026-09-29"
+    assert live.model_day(None) is None and live.model_day("inconnu") is None
+    models = {f"vainqueur_{MK3}": {"version": "20260929T0100Z_x"}, f"finish_{MK3}": {"version": "20260927T2100Z_y"},
+              f"vainqueur_{MKX}": {"version": "20260929T0100Z_x"}, f"duree_{MKX}": {}}
+    assert live.model_versions(models, MK3) == {"vainqueur": "2026-09-29", "finish": "2026-09-27"}
+    assert live.model_versions(models, MKX) == {"vainqueur": "2026-09-29"}
+
+
+def _match_with(rounds):
+    return {"league": MK3, "names": ["A", "B"], "start": T0.isoformat(), "rounds": rounds}
+
+
+def test_render_message_shows_model_date_before_disclaimer():
+    same = {"vainqueur": "2026-09-29", "finish": "2026-09-29"}
+    text = live.render_message(_match_with({"1": {"p1": 0.6, "finish": "R", "p_finish": 0.5, "versions": same}}))
+    assert text.endswith("\n🧠 Modèle du 29/09\n" + live.DISCLAIMER)
+    mixed = {"vainqueur": "2026-09-29", "finish": "2026-09-27"}
+    text = live.render_message(_match_with({"1": {"p1": 0.6, "finish": "R", "p_finish": 0.5, "versions": mixed}}))
+    assert "🧠 Modèles : vainqueur du 29/09 · finish du 27/09" in text
+    # finish non prédit sur cette manche : seul le modèle réellement utilisé est cité
+    assert "🧠 Modèle du 29/09" in live.render_message(_match_with({"1": {"p1": 0.6, "versions": mixed}}))
+    switched = live.render_message(_match_with({"1": {"p1": 0.6, "versions": {"vainqueur": "2026-09-28"}},
+                                                "2": {"p1": 0.6, "versions": {"vainqueur": "2026-09-29"}}}))
+    assert "🧠 Modèles du 28/09 et du 29/09 (mis à jour pendant le match)" in switched
+    # manches prédites avant ce changement (état déjà sur disque) : pas de ligne, pas d'erreur
+    assert "🧠" not in live.render_message(_match_with({"1": {"p1": 0.6}}))

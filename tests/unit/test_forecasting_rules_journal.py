@@ -84,8 +84,23 @@ def test_daily_report_text_and_empty_day(tmp_path):
     assert len(recs) == 1
     text = journal.daily_report(recs, day)
     assert text.startswith(f"📈 BILAN DES PRÉDICTIONS — {pd.Timestamp(day).strftime('%d/%m/%Y')}")
-    assert "modèle 100.0 % juste, favori du marché 0.0 %" in text
+    assert "modèle 100,0 % juste, favori du marché 0,0 %" in text
     assert "Règle prudente" in text and "ne pas parier" in text
     assert "aucune manche résolue" in text  # finish / durée absents ce jour-là
     assert journal.daily_report(recs, "2020-01-01") is None
     assert journal.read(tmp_path / "absent.jsonl") == []
+
+
+def test_daily_text_keeps_commas_and_uses_french_numbers():
+    """Régression : un ``.replace(",", " ")`` global effaçait les virgules du texte (bilan du 28/09)."""
+    summary = {k: journal._block(2147, 1207, 1241, 1454.0, 1441.0)
+               for k in (f"vainqueur_{MKX}", f"vainqueur_{MK3}", f"finish_{MK3}", f"duree_{MKX}")}
+    cumulative = {"n_paris": 194, "resultat": -63602.0, "rendement": -0.3278, "ic_bas": -0.5751, "ic_haut": -0.0317,
+                  "verdict": "en cours (194/500 paris minimum avant verdict)"}
+    text = journal.format_daily("2026-09-29", summary, [{"profit": -63602.0}], cumulative)
+    assert "(2\u00a0147 manches) : modèle 56,2 % juste, favori du marché 57,8 %" in text
+    assert "(log-loss 0,677 contre 0,671)" in text
+    assert "(finish R/F/B, avantage ≥ 3 pts, mise fictive 1\u00a0000 F) : 1 paris ce jour, -63\u00a0602 F" in text
+    assert "194 paris, -63\u00a0602 F, rendement -32,8 % [-57,5 % ; -3,2 %] — en cours" in text
+    assert "  " not in text.replace("\n   Cumul", "")  # plus aucune double espace laissée par une virgule effacée
+    assert journal._num(1234.5, 1, True) == "+1\u00a0234,5"

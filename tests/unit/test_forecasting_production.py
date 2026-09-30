@@ -49,6 +49,7 @@ def test_promotion_rules(tmp_path, candidates):
     assert all(d["promu"] and d["raison"] == "premier modèle de production" for d in first)
     sig, models = production.load_champions(tmp_path)
     assert set(models) == {c["key"] for c in candidates} and '"run1"' in sig
+    assert all(m["version"] == "run1" for m in models.values())  # affichée dans les messages (« Modèle du JJ/MM »)
 
     bad = [{**c, "obj": {**c["obj"], "modele": SkewedModel(c["n_classes"])}} for c in candidates]
     second = production.promote(tmp_path, "run2", bad, now=NOW)

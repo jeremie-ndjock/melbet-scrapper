@@ -1,5 +1,77 @@
 # Reconnaissance MelBet Cameroun – Mortal Kombat X (ligue `1252965`)
 
+> ## ⏩ Reprise rapide (état au 2026-09-30)
+>
+> **Ce qui existe.** Un collecteur de cotes MelBet Cameroun tourne en production sur un VPS AWS
+> depuis le 22/09. Il couvre 4 ligues virtuelles : Mortal Kombat X `1252965`, Mortal Kombat 3
+> `2282406`, AI Table Tennis Prague `3066896` et Goa `3066897`. Depuis le 25/09, des prédictions
+> Mortal Kombat sont publiées en direct dans le groupe Telegram « Prédiction Mortal Kombat » et
+> les modèles sont réentraînés chaque nuit. **Aucun avantage de pari n'est démontré** : chaque
+> message dit « ne pas parier », et cette mention doit rester. Rien n'est prévu pour AI Table
+> Tennis (aucun signal mesurable, section 42).
+>
+> **Se connecter.** `ssh -i oddscollector-key.pem ubuntu@13.62.173.176` (la clé est dans les
+> Téléchargements de l'utilisateur) ; projet dans `/opt/oddscollector` ; le VPS est à l'heure UTC.
+> Si la connexion expire, c'est que l'IP publique de l'utilisateur a changé (fréquent) :
+> l'utilisateur ajoute une règle entrante SSH `/32` pour sa nouvelle IP dans le groupe de sécurité
+> AWS (runbook §3).
+>
+> **Contrôle de santé, 5 minutes :**
+> 1. `docker compose ps` : `db`, `scraper`, `predictor`, `prometheus` et `grafana` en « Up »
+>    (`db` et `scraper` en « healthy »).
+> 2. `tail -5 /var/log/oddscollector-ml.log` : le dernier réentraînement de 4 h UTC se termine
+>    par « bilan envoyé ». Voir le risque mémoire, section 42.
+> 3. `docker compose logs --since 24h predictor | grep -c ERROR`, puis chercher « bilan quotidien
+>    du … publié ».
+> 4. `df -h /` et `ls -la backups` : 7 sauvegardes, qui grossissent chaque jour.
+> 5. Grafana : tunnel `ssh -L 3000:localhost:3000 …`, puis http://localhost:3000 (guide dans un
+>    document Claude, section 41).
+>
+> **Ce qui tourne tout seul** (crontab de `ubuntu`, plus 5 services Docker) :
+> - toutes les 5 min, la surveillance : 4 ligues, seuil de 120 s, alerte par e-mail et Telegram ;
+> - à 3 h UTC, la sauvegarde complète de la base (7 jours conservés) ;
+> - à 4 h UTC, l'évaluation et le réentraînement champion/challenger, avec un rapport dans
+>   `reports/forecasting/` sur le VPS (non versionné) et un bilan sur Telegram ;
+> - le service `predictor` publie les messages en direct, puis un bilan quotidien à 00 h 05 UTC.
+>
+> **À regarder en premier au retour :**
+> - le verdict de la règle prudente sur le finish (500 paris, attendu vers le 1er octobre), qui
+>   apparaît dans le bilan quotidien. Ne jamais modifier `src/forecasting/rules.py` : une variante
+>   compte comme un nouvel essai ;
+> - la mémoire du réentraînement : 0,97 Go le 30/09, environ +10 Mo par jour, et une limite de
+>   2 Go qui sera approchée vers la fin décembre ;
+> - le disque : les 7 sauvegardes complètes pèseront environ 2,6 Go fin octobre et 7 Go fin
+>   décembre, sur 48 Go (section 42) ;
+> - le taux réel de compression des cotes, visible à partir du 1er octobre ;
+> - pour versionner un nouveau rapport officiel, le copier du VPS dans `docs/forecasting/rapports/`.
+>
+> **Discipline et pièges :**
+> - Aucun secret ne doit être affiché ni versionné. Avant chaque commit, contrôle sans rien
+>   afficher : `grep -c -F -f <(grep -E '^(EMAIL_HOST_PASSWORD|TELEGRAM_BOT_TOKEN|POSTGRES_PASSWORD|GRAFANA_ADMIN_PASSWORD)=.' .env | cut -d= -f2-) <fichiers modifiés>`,
+>   qui doit donner 0 partout.
+> - Ne jamais ajouter au dépôt le fichier personnel « IA dans AWS.txt ».
+> - Avant tout commit : 2 exécutions complètes de
+>   `docker compose --profile test run --rm tests pytest -q -p no:cacheprovider`, une vérification
+>   réelle sur le VPS, puis une mise à jour de ce fichier.
+> - Déploiement sur le VPS : `git pull`, puis `docker compose --profile ml build ml` et
+>   `docker compose --profile ml up -d --no-build predictor` ; ajouter
+>   `docker compose up -d --build scraper` si le collecteur a changé.
+> - `reports/` est ignoré par Git. S'il disparaît après un pull :
+>   `mkdir -p reports/forecasting && sudo chown 10001:10001 reports/forecasting`.
+> - En local (Windows), Docker Desktop doit être lancé à la main et met plusieurs minutes à
+>   répondre (erreur 500 au début).
+>
+> **Carte des sections :**
+> - 1 à 25 : reconnaissance et collecteur Mortal Kombat ;
+> - 26 à 32 : AI Table Tennis ;
+> - 33 : VPS ;
+> - 35 et 36 : martingales ;
+> - 37 : plan d'entraînement ;
+> - 38 : évaluation des modèles ;
+> - 39 et 40 : prédictions en direct, réentraînement, règle prudente, bilan ;
+> - 41 : guide Grafana ;
+> - 42 : état au 30/09 (dimensionnement, AI Table Tennis, dernières modifications).
+
 Date de la reconnaissance : 2026-09-21
 URL cible : https://melbet-cm.com/fr/esports/virtual/mortal-kombat/1252965-mortal-kombat-x
 
@@ -2390,3 +2462,163 @@ Reste à faire :
 
 **Déploiements futurs** : `/reports/` étant ignoré par Git, un simple `git pull` suffit sur le
 VPS. La manipulation des droits de la section 40 n'est plus nécessaire.
+
+## 42. [CONTEXTE-EN-COURS] Contrôle du 29-30/09, dimensionnement du VPS, AI Table Tennis, ligne « modèle », bilan (2026-09-30)
+
+> Repère de reprise : chercher `[CONTEXTE-EN-COURS]`. Demandes de l'utilisateur (30/09, ≈ 0 h UTC),
+> dans l'ordre : 1. caractéristiques minimales du VPS ; 2. Memoire.md prêt pour une reprise dans
+> un mois ; 3. peut-on prédire sur AI Table Tennis ? ; 4. ligues AI Table Tennis dans la
+> surveillance ; 5. ligne « modèle du JJ/MM » dans les messages ; 6. corriger l'affichage du bilan.
+
+**Contrôle de production (29/09, 23 h 46 UTC)** : tout fonctionne.
+- Aucun redémarrage imprévu (`scraper` et `predictor` : 0 redémarrage depuis le déploiement du
+  28/09). Quatre coupures réseau Telegram passagères en 48 h, chaque fois retentées.
+- Réentraînements de 4 h UTC passés le 28/09 et le 29/09 (≈ 8 min chacun). Le 29/09, les 4
+  challengers ont été promus ; le service de prédiction les a rechargés seul.
+- Bilan quotidien du 28/09 publié à 00 h 05 UTC le 29/09.
+- Premiers chiffres réels, sur le 29/09 (modèle contre favori du marché, mêmes manches) :
+
+  | Cible | Manches | Modèle juste | Favori du marché juste |
+  |---|---|---|---|
+  | Vainqueur MKX | 2 072 | 57,0 % | 58,4 % |
+  | Vainqueur MK3 | 2 038 | 60,3 % | 60,9 % |
+  | Finish MK3 | 2 038 | 50,0 % | 50,0 % |
+  | Durée MKX | 2 061 | 49,9 % | 50,1 % |
+
+**Règle prudente, premier jour jugé (29/09)** : 194 paris, −63 602 F, rendement −32,8 %
+(IC 99 % : −57,5 % à −3,2 %) ; verdict officiel à 500 paris, attendu vers le 1er octobre.
+Contrôlé : ce n'est pas une erreur de calcul (fréquences réelles de chaque finish cohérentes avec
+les probabilités du marché et du modèle, donc cotes et classes bien alignées). Explication :
+- la log-loss du modèle bat celle du marché seulement grâce aux finishs rares, que le marché
+  surestime après retrait multiplicatif de la marge (Hara-Kiri 1,8 % contre 0,3 % réel, Animality
+  1,7 % contre 0,8 %, Friendship 2,0 % contre 1,2 %) ; on ne peut pas parier contre eux ;
+- sur Regular, Fatality et Brutality, là où la règle parie, le marché a raison : quand le modèle
+  voit la Fatality sous-cotée (29 % contre 23,5 %), elle ne sort que dans 16 % des cas (163 paris) ;
+- la marge du marché des finishs est d'environ 17 %.
+
+**Peut-on prédire sur AI Table Tennis ? Non, pas en l'état : aucun signal mesurable.** Analyse
+ponctuelle en lecture seule sur le VPS (conteneur `ml`, 9 940 matchs du 18/08 au 30/09, 24 825
+sets ; scripts non versionnés, méthode ci-dessous, à relancer en quelques minutes) :
+- **niveau des joueurs** : un Elo causal (K = 20, un match n'entre dans le calcul que 15 min après
+  son début), testé sur les 14 derniers jours (3 771 matchs) : le favori Elo gagne **50,5 %** des
+  matchs et **50,5 %** des sets (9 442), avec une log-loss de 0,7085, **pire que pile ou face**
+  (0,6931). Aucune tranche de confiance ne dépasse le hasard (51,8 %, 50,0 %, 48,7 %). L'écart de
+  27 % à 79 % de victoires vu sur une seule journée (section 27) était du bruit ;
+- **pools fermés** : 18 joueurs à Prague, 16 à Goa, 2 en commun ; le joueur 1 gagne 50,1 % et
+  50,7 % des matchs ;
+- **total de points d'un set** (marché `g=17`) : la moyenne des sets passés des deux joueurs ne
+  prédit presque rien (corrélation +0,024 ; total moyen réel de 18,81 à 19,01 points entre le
+  quintile le plus bas et le plus haut ; plus de 19 points dans 37,9 % des sets contre 35,0 %) ;
+  19,1 % des sets vont au-delà de 10-10 ;
+- **aucune cote avant le début** : sur 24 h, 0 relevé de cote `g=1` ou `g=17` antérieur au début
+  du match ; la cote médiane est de 1,85 partout (section 36 : le marché d'un set s'ouvre à
+  1,85/1,85, soit 8,1 % de marge, et il faudrait plus de 54,1 % de réussite pour gagner).
+
+Le simulateur AI Table Tennis se comporte comme un tirage au sort équilibré. Publier des
+prédictions n'aurait aucune valeur (≈ 50 % de réussite) et pourrait induire en erreur. Si
+l'utilisateur veut quand même aller plus loin, pistes possibles, sans promesse : cotes en cours
+de set (point par point, section 27), ou relancer ce contrôle dans un mois avec plus de données.
+
+**Modifications de code (demandes 4, 5, 6)** :
+- **Surveillance** : `scripts/watchdog.py` surveille par défaut les quatre ligues
+  (`DEFAULT_LEAGUE_IDS = "1252965,2282406,3066896,3066897"`), sans réglage du `.env`, qui n'en
+  contenait aucun. Mesure préalable sur 7 jours de `collection_log` : intervalle maximal entre
+  deux cycles réussis de 75 s pour les ligues AI Table Tennis (seuil d'alerte 120 s), 0 cycle en
+  échec, donc pas de fausse alerte à craindre. Nouveau test : toute ligue de
+  `config/leagues.yaml` est surveillée par défaut.
+- **Ligne « modèle »** : chaque modèle chargé porte sa `version` (nom de l'exécution,
+  ex. `20260929T0100Z_51c5b0c`, dans `production.load_champions` et `live.latest_models`). Chaque
+  manche prédite note le jour de chaque modèle utilisé (`versions`). Le message affiche, juste
+  avant la mention « ne pas parier » :
+  - « 🧠 Modèle du 29/09 » si tous les modèles utilisés datent du même jour ;
+  - « 🧠 Modèles : vainqueur du 29/09 · finish du 27/09 » si les dates diffèrent selon la cible ;
+  - « 🧠 Modèles du 28/09 et du 29/09 (mis à jour pendant le match) » si un nouveau modèle a été
+    promu en cours de match.
+
+  Seuls les modèles réellement utilisés sont cités (finish, durée). Les manches prédites avant ce
+  changement n'affichent pas de ligne.
+- **Bilan quotidien** : un `.replace(",", " ")` appliqué à toute la ligne effaçait les virgules du
+  texte (« R/F/B  avantage ≥ 3 pts »). Nouvelle fonction `journal._num` : virgule décimale,
+  espace insécable entre les milliers (« 56,2 % », « −63 602 F », « log-loss 0,677 »). Test de
+  non-régression avec les chiffres réels du 29/09.
+
+**Dimensionnement du VPS (demande 1), mesuré le 30/09 entre 0 h et 0 h 40 UTC.**
+
+Instance actuelle : `m7i-flex.large`, 2 vCPU, 7,6 Go de RAM, pas de swap, disque gp3 de 48 Go.
+
+Mémoire des conteneurs en régime normal (`docker stats`) :
+
+| Conteneur | Mémoire |
+|---|---|
+| `db` (TimescaleDB) | 1,72 Gio (dont `shared_buffers` = 1 944 Mo, réglé automatiquement à 25 % de 8 Go lors de la création du volume) |
+| `grafana` | 361 Mio |
+| `predictor` | 296 Mio (limite 1 Gio) |
+| `scraper` | 121 Mio |
+| `prometheus` | 37 Mio |
+
+Au total, environ 2,5 Gio. Avec le système et Docker, `free` indique 3,1 Go utilisés et
+4,7 Go disponibles.
+
+**Réentraînement de 4 h UTC** : deux copies isolées du travail complet, avec rapports, registre
+et modèles dans `/tmp` du conteneur (rien d'officiel touché), mesurées par le `memory.peak` du
+cgroup :
+
+| Date de référence | Lignes de cotes par ligue | Durée | Pic mémoire | Temps CPU |
+|---|---|---|---|---|
+| 26/09 01 h | ≈ 137 000 | 470 s | 0,93 Go | — |
+| 29/09 21 h | ≈ 290 000 | 489 s | 0,97 Go | 485 s, un cœur plein |
+
+L'essentiel de la mémoire vient de l'historique de 100 jours de résultats, qui est stable. Les
+cotes, qui s'accumulent depuis le 22/09 sans limite (environ 41 000 lignes par jour et par ligue),
+ajoutent environ 10 Mo et 5 s par jour. La limite de 2 Go du conteneur `ml` sera donc approchée
+vers la fin décembre 2026. Il faudra alors borner la fenêtre de cotes de l'évaluation (décision
+de méthode, à soumettre à l'utilisateur) ou relever `mem_limit`.
+
+**Disque** : 12 Go utilisés sur 48 Go.
+- Volume de la base : 1,8 Go (`odds_snapshots` 1,36 Go, `game_state` 122 Mo, `round_results`
+  49 Mo).
+- Images Docker : 5,5 Go ; cache de construction : 1,4 Go, dont 0,7 Go récupérable.
+- Grafana : 338 Mo. Sauvegardes : 216 Mo.
+
+Croissance :
+- **Cotes** : environ 1 million de lignes par jour, soit environ 200 Mo par jour non compressés.
+  La compression TimescaleDB s'applique aux chunks de plus de 7 jours, mais aucun chunk n'était
+  encore compressé au 30/09 : le premier le sera vers le 1er octobre, et le taux réel sera
+  mesurable ensuite.
+- **Sauvegardes** : ce sont des `pg_dump` complets, gzip, 7 conservées. Chacune grossit
+  d'environ 10,4 Mo par jour (42, 52 puis 63 Mo du 27 au 29/09). Projection pour les 7 : environ
+  2,6 Go dans un mois, 7 Go dans trois mois, 27 Go dans un an. **C'est le vrai consommateur de
+  disque à long terme.** De plus, elles sont sur le même disque que la base : elles ne protègent
+  pas d'une perte du disque.
+
+**Caractéristiques minimales pour la charge actuelle** :
+- **2 vCPU.** Occupation moyenne mesurée par `/proc/stat` sur 7 j 7 h : 3,0 % de la machine,
+  soit 6 % d'un cœur. Temps CPU cumulé des conteneurs, rapporté à leur durée de fonctionnement :
+  `predictor` 2,1 %, `scraper` 1,6 %, `db` 1,0 %, `grafana` 0,8 %, `prometheus` 0,3 % d'un cœur.
+  Le seul pic est le réentraînement, un cœur plein pendant 8 min par jour. Une instance à
+  crédits (famille t3, 20 % par vCPU garantis) suffit largement : le processeur n'est pas la
+  contrainte, la mémoire l'est.
+- **4 Go de RAM, plus 2 à 4 Go de swap**, à condition de ramener `shared_buffers` à environ 1 Go
+  (fait automatiquement si la base est recréée sur la nouvelle machine puis restaurée ; à régler
+  à la main si le volume est déplacé tel quel). Estimation : environ 2,5 Go en régime normal et
+  3,5 Go au pic de 4 h.
+- **Disque de 30 Go** pour 3 à 6 mois ; au-delà, réduire le nombre de sauvegardes conservées ou
+  les déplacer vers S3.
+- Équivalent AWS : `t3.medium` (2 vCPU, 4 Go).
+- **Déconseillé** : 2 Go (`t3.small`, `t3.micro`), sauf à retirer Grafana et Prometheus et à
+  faire le réentraînement ailleurs.
+- L'instance actuelle de 8 Go garde une marge confortable (4,7 Go disponibles).
+
+**Reste à faire (état tenu à jour) :**
+- [x] tests ciblés : 28 réussis. Un premier essai avait échoué à cause de `\n` écrits comme de
+  vrais retours à la ligne par le script d'édition ; corrigé, et les espaces insécables sont
+  désormais écrites ` ` dans le code ;
+- [x] deux exécutions complètes de la suite de tests : 366 réussis chaque fois (22 min 41 s et
+  22 min 04 s) ;
+- [x] contrôle des secrets : 0 occurrence dans les 9 fichiers modifiés ; commit et push ;
+- [ ] sur le VPS : `git pull`, `docker compose --profile ml build ml`,
+  `docker compose --profile ml up -d --no-build predictor` ; la surveillance lit le script
+  directement depuis le dépôt (volume `.:/app` du service `tests`), sans reconstruction ;
+- [ ] vérifications réelles : surveillance lancée à la main (code de sortie 0 avec les 4 ligues),
+  bilan du 29/09 rendu avec le nouveau format, ligne « 🧠 Modèle du … » visible dans un message
+  en direct, 0 erreur.
